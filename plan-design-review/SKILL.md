@@ -860,6 +860,44 @@ descriptions of what 10/10 looks like.
 
 ## Review Sections (7 passes, after scope is agreed)
 
+## Prior Learnings
+
+Search for relevant learnings from previous sessions:
+
+```bash
+_CROSS_PROJ=$(~/.claude/skills/gstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+echo "CROSS_PROJECT: $_CROSS_PROJ"
+if [ "$_CROSS_PROJ" = "true" ]; then
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+else
+  ~/.claude/skills/gstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+fi
+```
+
+If `CROSS_PROJECT` is `unset` (first time): Use AskUserQuestion:
+
+> gstack can search learnings from your other projects on this machine to find
+> patterns that might apply here. This stays local (no data leaves your machine).
+> Recommended for solo developers. Skip if you work on multiple client codebases
+> where cross-contamination would be a concern.
+
+Options:
+- A) Enable cross-project learnings (recommended)
+- B) Keep learnings project-scoped only
+
+If A: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/gstack/bin/gstack-config set cross_project_learnings false`
+
+Then re-run the search with the appropriate flag.
+
+If learnings are found, incorporate them into your analysis. When a review finding
+matches a past learning, display:
+
+**"Prior learning applied: [key] (confidence N/10, from [date])"**
+
+This makes the compounding visible. The user should see that gstack is getting
+smarter on their codebase over time.
+
 ### Pass 1: Information Architecture
 Rate 0-10: Does the plan define what the user sees first, second, third?
 FIX TO 10: Add information hierarchy to the plan. Include ASCII diagram of screen/page structure and navigation flow. Apply "constraint worship" — if you can only show 3 things, which 3?
@@ -1214,6 +1252,31 @@ plan's living status.
 - If no such section exists, **append it** to the end of the plan file.
 - Always place it as the very last section in the plan file. If it was found mid-file,
   move it: delete the old location and append at the end.
+
+## Capture Learnings
+
+If you discovered a non-obvious pattern, pitfall, or architectural insight during
+this session, log it for future sessions:
+
+```bash
+~/.claude/skills/gstack/bin/gstack-learnings-log '{"skill":"plan-design-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+```
+
+**Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
+(user stated), `architecture` (structural decision), `tool` (library/framework insight),
+`operational` (project environment/CLI/workflow knowledge).
+
+**Sources:** `observed` (you found this in the code), `user-stated` (user told you),
+`inferred` (AI deduction), `cross-model` (both Claude and Codex agree).
+
+**Confidence:** 1-10. Be honest. An observed pattern you verified in the code is 8-9.
+An inference you're not sure about is 4-5. A user preference they explicitly stated is 10.
+
+**files:** Include the specific file paths this learning references. This enables
+staleness detection: if those files are later deleted, the learning can be flagged.
+
+**Only log genuine discoveries.** Don't log obvious things. Don't log things the user
+already knows. A good test: would this insight save time in a future session? If yes, log it.
 
 ## Next Steps — Review Chaining
 
