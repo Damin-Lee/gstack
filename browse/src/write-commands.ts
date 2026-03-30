@@ -24,34 +24,92 @@ function validateOutputPath(filePath: string): void {
   }
 }
 
-/** Common selectors for page clutter removal */
+/**
+ * Aggressive page cleanup selectors and heuristics.
+ * Goal: make the page readable and clean while keeping it recognizable.
+ * Inspired by uBlock Origin filter lists, Readability.js, and reader mode heuristics.
+ */
 const CLEANUP_SELECTORS = {
   ads: [
+    // Google Ads
     'ins.adsbygoogle', '[id^="google_ads"]', '[id^="div-gpt-ad"]',
     'iframe[src*="doubleclick"]', 'iframe[src*="googlesyndication"]',
+    '[data-google-query-id]', '.google-auto-placed',
+    // Generic ad patterns (uBlock Origin common filters)
     '[class*="ad-banner"]', '[class*="ad-wrapper"]', '[class*="ad-container"]',
-    '[data-ad]', '[data-ad-slot]', '[class*="sponsored"]',
+    '[class*="ad-slot"]', '[class*="ad-unit"]', '[class*="ad-zone"]',
+    '[class*="ad-placement"]', '[class*="ad-holder"]', '[class*="ad-block"]',
+    '[class*="adbox"]', '[class*="adunit"]', '[class*="adwrap"]',
+    '[id*="ad-banner"]', '[id*="ad-wrapper"]', '[id*="ad-container"]',
+    '[id*="ad-slot"]', '[id*="ad_banner"]', '[id*="ad_container"]',
+    '[data-ad]', '[data-ad-slot]', '[data-ad-unit]', '[data-adunit]',
+    '[class*="sponsored"]', '[class*="Sponsored"]',
     '.ad', '.ads', '.advert', '.advertisement',
+    '#ad', '#ads', '#advert', '#advertisement',
+    // Common ad network iframes
+    'iframe[src*="amazon-adsystem"]', 'iframe[src*="outbrain"]',
+    'iframe[src*="taboola"]', 'iframe[src*="criteo"]',
+    'iframe[src*="adsafeprotected"]', 'iframe[src*="moatads"]',
+    // Promoted/sponsored content
+    '[class*="promoted"]', '[class*="Promoted"]',
+    '[data-testid*="promo"]', '[class*="native-ad"]',
+    // Empty ad placeholders (divs with only ad classes, no real content)
+    'aside[class*="ad"]', 'section[class*="ad-"]',
   ],
   cookies: [
+    // Cookie consent frameworks
     '[class*="cookie-consent"]', '[class*="cookie-banner"]', '[class*="cookie-notice"]',
     '[id*="cookie-consent"]', '[id*="cookie-banner"]', '[id*="cookie-notice"]',
-    '[class*="consent-banner"]', '[class*="consent-modal"]',
-    '[class*="gdpr"]', '[id*="gdpr"]',
+    '[class*="consent-banner"]', '[class*="consent-modal"]', '[class*="consent-wall"]',
+    '[class*="gdpr"]', '[id*="gdpr"]', '[class*="GDPR"]',
     '[class*="CookieConsent"]', '[id*="CookieConsent"]',
-    '#onetrust-consent-sdk', '.onetrust-pc-dark-filter',
-    '[class*="cc-banner"]', '[class*="cc-window"]',
+    // OneTrust (very common)
+    '#onetrust-consent-sdk', '.onetrust-pc-dark-filter', '#onetrust-banner-sdk',
+    // Cookiebot
+    '#CybotCookiebotDialog', '#CybotCookiebotDialogBodyUnderlay',
+    // TrustArc / TRUSTe
+    '#truste-consent-track', '.truste_overlay', '.truste_box_overlay',
+    // Quantcast
+    '.qc-cmp2-container', '#qc-cmp2-main',
+    // Generic patterns
+    '[class*="cc-banner"]', '[class*="cc-window"]', '[class*="cc-overlay"]',
+    '[class*="privacy-banner"]', '[class*="privacy-notice"]',
+    '[id*="privacy-banner"]', '[id*="privacy-notice"]',
+    '[class*="accept-cookies"]', '[id*="accept-cookies"]',
+  ],
+  overlays: [
+    // Paywall / subscription overlays
+    '[class*="paywall"]', '[class*="Paywall"]', '[id*="paywall"]',
+    '[class*="subscribe-wall"]', '[class*="subscription-wall"]',
+    '[class*="meter-wall"]', '[class*="regwall"]', '[class*="reg-wall"]',
+    // Newsletter / signup popups
+    '[class*="newsletter-popup"]', '[class*="newsletter-modal"]',
+    '[class*="signup-modal"]', '[class*="signup-popup"]',
+    '[class*="email-capture"]', '[class*="lead-capture"]',
+    '[class*="popup-modal"]', '[class*="modal-overlay"]',
+    // Interstitials
+    '[class*="interstitial"]', '[id*="interstitial"]',
+    // Push notification prompts
+    '[class*="push-notification"]', '[class*="notification-prompt"]',
+    '[class*="web-push"]',
+    // Survey / feedback popups
+    '[class*="survey-"]', '[class*="feedback-modal"]',
+    '[id*="survey-"]', '[class*="nps-"]',
+    // App download banners
+    '[class*="app-banner"]', '[class*="smart-banner"]', '[class*="app-download"]',
+    '[id*="branch-banner"]', '.smartbanner',
   ],
   sticky: [
-    // Select fixed/sticky positioned elements (except navs and headers at top)
-    // This is handled via JavaScript evaluation, not pure selectors
+    // Handled via JavaScript evaluation, not pure selectors
   ],
   social: [
     '[class*="social-share"]', '[class*="share-buttons"]', '[class*="share-bar"]',
-    '[class*="social-widget"]', '[class*="social-icons"]',
+    '[class*="social-widget"]', '[class*="social-icons"]', '[class*="share-tools"]',
     'iframe[src*="facebook.com/plugins"]', 'iframe[src*="platform.twitter"]',
     '[class*="fb-like"]', '[class*="tweet-button"]',
     '[class*="addthis"]', '[class*="sharethis"]',
+    // Follow prompts
+    '[class*="follow-us"]', '[class*="social-follow"]',
   ],
 };
 
@@ -428,10 +486,12 @@ export async function handleWriteCommand(
     case 'cleanup': {
       // Parse flags
       let doAds = false, doCookies = false, doSticky = false, doSocial = false;
+      let doOverlays = false;
       let doAll = false;
 
+      // Default to --all if no args (most common use case from sidebar button)
       if (args.length === 0) {
-        throw new Error('Usage: browse cleanup [--ads] [--cookies] [--sticky] [--social] [--all]');
+        doAll = true;
       }
 
       for (const arg of args) {
@@ -440,14 +500,15 @@ export async function handleWriteCommand(
           case '--cookies': doCookies = true; break;
           case '--sticky': doSticky = true; break;
           case '--social': doSocial = true; break;
+          case '--overlays': doOverlays = true; break;
           case '--all': doAll = true; break;
           default:
-            throw new Error(`Unknown cleanup flag: ${arg}. Use: --ads, --cookies, --sticky, --social, --all`);
+            throw new Error(`Unknown cleanup flag: ${arg}. Use: --ads, --cookies, --sticky, --social, --overlays, --all`);
         }
       }
 
       if (doAll) {
-        doAds = doCookies = doSticky = doSocial = true;
+        doAds = doCookies = doSticky = doSocial = doOverlays = true;
       }
 
       const removed: string[] = [];
@@ -457,6 +518,7 @@ export async function handleWriteCommand(
       if (doAds) selectors.push(...CLEANUP_SELECTORS.ads);
       if (doCookies) selectors.push(...CLEANUP_SELECTORS.cookies);
       if (doSocial) selectors.push(...CLEANUP_SELECTORS.social);
+      if (doOverlays) selectors.push(...CLEANUP_SELECTORS.overlays);
 
       if (selectors.length > 0) {
         const count = await page.evaluate((sels: string[]) => {
@@ -465,7 +527,7 @@ export async function handleWriteCommand(
             try {
               const els = document.querySelectorAll(sel);
               els.forEach(el => {
-                (el as HTMLElement).style.display = 'none';
+                (el as HTMLElement).style.setProperty('display', 'none', 'important');
                 removed++;
               });
             } catch {}
@@ -476,6 +538,7 @@ export async function handleWriteCommand(
           if (doAds) removed.push('ads');
           if (doCookies) removed.push('cookie banners');
           if (doSocial) removed.push('social widgets');
+          if (doOverlays) removed.push('overlays/popups');
         }
       }
 
@@ -488,13 +551,15 @@ export async function handleWriteCommand(
             const style = getComputedStyle(el);
             if (style.position === 'fixed' || style.position === 'sticky') {
               const tag = el.tagName.toLowerCase();
-              // Skip main nav/header elements
+              // Skip main nav/header elements at the top of the page
               if (tag === 'nav' || tag === 'header') continue;
               if (el.getAttribute('role') === 'navigation') continue;
               // Skip elements at the very top that look like navbars
               const rect = el.getBoundingClientRect();
               if (rect.top <= 10 && rect.height < 100 && tag !== 'div') continue;
-              (el as HTMLElement).style.display = 'none';
+              // Skip the gstack control indicator
+              if (el.id === 'gstack-ctrl') continue;
+              (el as HTMLElement).style.setProperty('display', 'none', 'important');
               removed++;
             }
           }
@@ -502,6 +567,73 @@ export async function handleWriteCommand(
         });
         if (stickyCount > 0) removed.push(`${stickyCount} sticky/fixed elements`);
       }
+
+      // Unlock scrolling (many sites lock body scroll when modals are open)
+      const scrollFixed = await page.evaluate(() => {
+        let fixed = 0;
+        // Unlock body and html scroll
+        for (const el of [document.body, document.documentElement]) {
+          if (!el) continue;
+          const style = getComputedStyle(el);
+          if (style.overflow === 'hidden' || style.overflowY === 'hidden') {
+            (el as HTMLElement).style.setProperty('overflow', 'auto', 'important');
+            (el as HTMLElement).style.setProperty('overflow-y', 'auto', 'important');
+            fixed++;
+          }
+          // Remove height:100% + position:fixed that locks scroll
+          if (style.position === 'fixed' && (el === document.body || el === document.documentElement)) {
+            (el as HTMLElement).style.setProperty('position', 'static', 'important');
+            fixed++;
+          }
+        }
+        // Remove blur/filter effects (paywalls often blur the content)
+        const blurred = document.querySelectorAll('[style*="blur"], [style*="filter"]');
+        blurred.forEach(el => {
+          const s = (el as HTMLElement).style;
+          if (s.filter?.includes('blur') || s.webkitFilter?.includes('blur')) {
+            s.setProperty('filter', 'none', 'important');
+            s.setProperty('-webkit-filter', 'none', 'important');
+            fixed++;
+          }
+        });
+        // Remove max-height truncation (article truncation)
+        const truncated = document.querySelectorAll('[class*="truncat"], [class*="preview"], [class*="teaser"]');
+        truncated.forEach(el => {
+          const s = getComputedStyle(el);
+          if (s.maxHeight && s.maxHeight !== 'none' && parseInt(s.maxHeight) < 500) {
+            (el as HTMLElement).style.setProperty('max-height', 'none', 'important');
+            (el as HTMLElement).style.setProperty('overflow', 'visible', 'important');
+            fixed++;
+          }
+        });
+        return fixed;
+      });
+      if (scrollFixed > 0) removed.push('scroll unlocked');
+
+      // Remove empty ad placeholder whitespace (divs that are now empty after ad removal)
+      const collapsedCount = await page.evaluate(() => {
+        let collapsed = 0;
+        const candidates = document.querySelectorAll(
+          'div[class*="ad"], div[id*="ad"], aside[class*="ad"], div[class*="sidebar"], ' +
+          'div[class*="rail"], div[class*="right-col"], div[class*="widget"]'
+        );
+        for (const el of candidates) {
+          const rect = el.getBoundingClientRect();
+          // If the element has significant height but no visible text content, collapse it
+          if (rect.height > 50 && rect.width > 0) {
+            const text = (el.textContent || '').trim();
+            const images = el.querySelectorAll('img:not([src*="logo"]):not([src*="icon"])');
+            const links = el.querySelectorAll('a');
+            // Empty or mostly empty: collapse
+            if (text.length < 20 && images.length === 0 && links.length < 2) {
+              (el as HTMLElement).style.setProperty('display', 'none', 'important');
+              collapsed++;
+            }
+          }
+        }
+        return collapsed;
+      });
+      if (collapsedCount > 0) removed.push(`${collapsedCount} empty placeholders`);
 
       if (removed.length === 0) return 'No clutter elements found to remove.';
       return `Cleaned up: ${removed.join(', ')}`;
