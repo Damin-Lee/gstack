@@ -221,14 +221,14 @@ describe('sidebar agent queue poll (sidebar-agent.ts)', () => {
 describe('system prompt size', () => {
   const serverSrc = fs.readFileSync(path.join(ROOT, 'src', 'server.ts'), 'utf-8');
 
-  test('system prompt is compact (under 20 lines)', () => {
+  test('system prompt is compact (under 30 lines)', () => {
     const start = serverSrc.indexOf('const systemPrompt = [');
     const end = serverSrc.indexOf("].join('\\n');", start);
     const promptBlock = serverSrc.slice(start, end);
     const lines = promptBlock.split('\n').length;
     // Compact prompt = fewer input tokens = faster first response
-    // Slightly higher limit because of per-tab instruction line
-    expect(lines).toBeLessThan(20);
+    // Higher limit accommodates security lines (prompt injection defense, allowed commands)
+    expect(lines).toBeLessThan(30);
   });
 
   test('system prompt does not contain verbose narration examples', () => {
