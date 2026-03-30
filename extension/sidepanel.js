@@ -1153,29 +1153,59 @@ inspectorSendBtn.addEventListener('click', () => {
 
 async function runCleanup(...buttons) {
   if (!serverUrl || !serverToken) {
-    // Don't spam errors, buttons should already be disabled
     return;
   }
   buttons.forEach(b => b?.classList.add('loading'));
+
+  // Smart cleanup: send a chat message to the sidebar agent (an LLM).
+  // The agent snapshots the page, understands it semantically, and removes
+  // clutter intelligently. Much better than brittle CSS selectors.
+  const cleanupPrompt = [
+    'Clean up this page for reading. First run a quick deterministic pass:',
+    '$B cleanup --all',
+    '',
+    'Then take a snapshot to see what\'s left:',
+    '$B snapshot -i',
+    '',
+    'Look at the snapshot and identify remaining non-content elements:',
+    '- Ad placeholders, "ADVERTISEMENT" labels, sponsored content',
+    '- Cookie/consent banners, newsletter popups, login walls',
+    '- Audio/podcast player widgets, video autoplay',
+    '- Sidebar widgets (puzzles, games, "most popular", recommendations)',
+    '- Social share buttons, follow prompts, "See more on Google"',
+    '- Floating chat widgets, feedback buttons',
+    '- Navigation drawers, mega-menus (unless they ARE the page content)',
+    '- Empty whitespace from removed ads',
+    '',
+    'KEEP: the site header/masthead/logo, article headline, article body,',
+    'article images, author byline, date. The page should still look like',
+    'the site it is, just without the crap.',
+    '',
+    'For each element to remove, run JavaScript via $B to hide it:',
+    '$B eval "document.querySelector(\'SELECTOR\').style.display=\'none\'"',
+    '',
+    'Also unlock scrolling if the page is scroll-locked:',
+    '$B eval "document.body.style.overflow=\'auto\';document.documentElement.style.overflow=\'auto\'"',
+  ].join('\n');
+
   try {
-    const resp = await fetch(`${serverUrl}/command`, {
+    // Send as a sidebar command (spawns the agent)
+    const resp = await fetch(`${serverUrl}/sidebar-command`, {
       method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: 'cleanup', args: ['--all'] }),
-      signal: AbortSignal.timeout(15000),
+      headers: authHeaders(),
+      body: JSON.stringify({ message: cleanupPrompt }),
+      signal: AbortSignal.timeout(5000),
     });
-    const text = await resp.text();
     if (resp.ok) {
-      addChatEntry({ type: 'notification', message: text || 'Page cleaned up' });
-      if (typeof inspectorShowEmpty === 'function') inspectorShowEmpty();
+      addChatEntry({ type: 'notification', message: 'Cleaning up page (agent is analyzing...)' });
     } else {
-      const err = JSON.parse(text).error || 'Cleanup failed';
-      addChatEntry({ type: 'notification', message: 'Error: ' + err });
+      addChatEntry({ type: 'notification', message: 'Failed to start cleanup' });
     }
   } catch (err) {
     addChatEntry({ type: 'notification', message: 'Cleanup failed: ' + err.message });
   } finally {
-    buttons.forEach(b => b?.classList.remove('loading'));
+    // Remove loading after a short delay (agent runs async)
+    setTimeout(() => buttons.forEach(b => b?.classList.remove('loading')), 2000);
   }
 }
 
