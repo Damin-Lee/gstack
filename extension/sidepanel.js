@@ -209,6 +209,10 @@ function handleAgentEvent(entry) {
   }
 
   if (entry.type === 'agent_error') {
+    // Suppress timeout errors that fire after agent_done (cleanup noise)
+    if (entry.error && entry.error.includes('Timed out') && !agentContainer) {
+      return;
+    }
     const thinking = document.getElementById('agent-thinking');
     if (thinking) thinking.remove();
     updateStopButton(false);
@@ -402,19 +406,13 @@ async function pollChat() {
     }
 
     // Clean up orphaned thinking indicators after replay.
+    // Only show "(session ended)" if there's actually a thinking spinner
+    // to clean up (not on every idle poll, which would spam the chat).
     const thinking = document.getElementById('agent-thinking');
     if (thinking && data.agentStatus !== 'processing') {
       thinking.remove();
-      if (agentContainer) {
-        const notice = document.createElement('div');
-        notice.className = 'agent-text';
-        notice.style.color = 'var(--text-meta)';
-        notice.style.fontStyle = 'italic';
-        notice.textContent = '(session ended)';
-        agentContainer.appendChild(notice);
-        agentContainer = null;
-        agentTextEl = null;
-      }
+      agentContainer = null;
+      agentTextEl = null;
     }
 
     // Show/hide stop button based on agent status
