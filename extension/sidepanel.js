@@ -381,10 +381,13 @@ async function pollChat() {
     }
     const data = await resp.json();
 
-    // Detect tab switch from server — swap chat context
+    // Detect tab switch from server — swap chat context.
+    // IMPORTANT: return before cleaning up thinking dots — the agent may be
+    // processing on the NEW tab while the OLD tab is idle. Removing the
+    // thinking indicator here would kill the optimistic UI before the switch.
     if (data.activeTabId !== undefined && data.activeTabId !== sidebarActiveTabId) {
       switchChatTab(data.activeTabId);
-      return; // switchChatTab triggers a fresh poll
+      return; // switchChatTab triggers a fresh poll on the correct tab
     }
 
     // First successful poll — hide loading spinner
@@ -409,8 +412,9 @@ async function pollChat() {
     }
 
     // Clean up orphaned thinking indicators after replay.
-    // Only show "(session ended)" if there's actually a thinking spinner
-    // to clean up (not on every idle poll, which would spam the chat).
+    // Only remove if we're on the CORRECT tab and the agent is truly idle.
+    // Don't clean up during tab switches — the agent may be processing on
+    // the new tab while the old tab shows idle.
     const thinking = document.getElementById('agent-thinking');
     if (thinking && data.agentStatus !== 'processing') {
       thinking.remove();
@@ -437,10 +441,21 @@ function switchChatTab(newTabId) {
 
   sidebarActiveTabId = newTabId;
 
-  // Restore saved chat for new tab, or show welcome
+  // Restore saved chat for new tab, or carry over current DOM if we're
+  // mid-message (the server may have switched tabs because the user's
+  // Chrome tab changed, but we still want to show the optimistic UI).
   if (chatDomByTab[newTabId]) {
     chatMessages.innerHTML = chatDomByTab[newTabId];
     chatLineCount = chatLineCountByTab[newTabId] || 0;
+    // Reset agent state for restored tab
+    agentContainer = null;
+    agentTextEl = null;
+    agentText = '';
+  } else if (lastOptimisticMsg && document.getElementById('agent-thinking')) {
+    // We're mid-send with optimistic UI — keep it, don't blow it away.
+    // The poll for the new tab will pick up the entries and sync naturally.
+    chatLineCount = 0;
+    // agentContainer/agentTextEl are already set from sendMessage()
   } else {
     chatMessages.innerHTML = `
       <div class="chat-welcome" id="chat-welcome">
@@ -449,12 +464,11 @@ function switchChatTab(newTabId) {
         <p class="muted">Each tab has its own conversation.</p>
       </div>`;
     chatLineCount = 0;
+    // Reset agent state for fresh tab
+    agentContainer = null;
+    agentTextEl = null;
+    agentText = '';
   }
-
-  // Reset agent state for this tab
-  agentContainer = null;
-  agentTextEl = null;
-  agentText = '';
 
   // Immediately poll the new tab's chat
   pollChat();
