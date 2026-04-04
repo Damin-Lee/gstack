@@ -165,8 +165,10 @@ describe('sidebar JS (sidepanel.js)', () => {
     expect(js).toContain("data.agentStatus !== 'processing'");
   });
 
-  test('orphaned thinking cleanup adds (session ended) notice', () => {
-    expect(js).toContain('(session ended)');
+  test('orphaned thinking cleanup removes thinking dots silently', () => {
+    // Thinking dots are removed when agent is idle — no "(session ended)"
+    // notice, which was removed as noisy false-positive UX
+    expect(js).toContain('thinking.remove()');
   });
 
   test('sendMessage renders user bubble + thinking dots optimistically', () => {
@@ -1321,11 +1323,79 @@ describe('sidebar auto-open (background.js)', () => {
   });
 });
 
-describe('extension dispatches gstack-extension-ready event', () => {
+describe('sidebar arrow hint hide flow (4-step signal chain)', () => {
+  // The arrow hint on the welcome page should ONLY hide when the sidebar
+  // is actually opened, not when the extension content script loads.
+  //
+  // Signal flow:
+  //   1. sidepanel.js connects → sends { type: 'sidebarOpened' } to background
+  //   2. background.js receives → relays to active tab's content script
+  //   3. content.js receives 'sidebarOpened' → dispatches 'gstack-extension-ready'
+  //   4. welcome.html listens for 'gstack-extension-ready' → hides arrow
+  //
   const contentSrc = fs.readFileSync(path.join(ROOT, '..', 'extension', 'content.js'), 'utf-8');
+  const bgSrc = fs.readFileSync(path.join(ROOT, '..', 'extension', 'background.js'), 'utf-8');
+  const spSrc = fs.readFileSync(path.join(ROOT, '..', 'extension', 'sidepanel.js'), 'utf-8');
+  const welcomeSrc = fs.readFileSync(path.join(ROOT, 'src', 'welcome.html'), 'utf-8');
 
-  test('content.js dispatches gstack-extension-ready CustomEvent', () => {
+  // Step 1: sidepanel sends sidebarOpened when connected
+  test('step 1: sidepanel sends sidebarOpened message on connect', () => {
+    expect(spSrc).toContain("{ type: 'sidebarOpened' }");
+    // Should be in updateConnection, after setConnState('connected')
+    const connectFn = spSrc.slice(
+      spSrc.indexOf('function updateConnection('),
+      spSrc.indexOf('function updateConnection(') + 800,
+    );
+    expect(connectFn).toContain('sidebarOpened');
+  });
+
+  // Step 2: background.js accepts and relays sidebarOpened
+  test('step 2: background.js allows sidebarOpened message type', () => {
+    expect(bgSrc).toContain("'sidebarOpened'");
+    // Must be in ALLOWED_TYPES
+    const allowedBlock = bgSrc.slice(
+      bgSrc.indexOf('ALLOWED_TYPES'),
+      bgSrc.indexOf('ALLOWED_TYPES') + 300,
+    );
+    expect(allowedBlock).toContain('sidebarOpened');
+  });
+
+  test('step 2: background.js relays sidebarOpened to active tab content script', () => {
+    expect(bgSrc).toContain("msg.type === 'sidebarOpened'");
+    // Should send to active tab via chrome.tabs.sendMessage
+    const handler = bgSrc.slice(
+      bgSrc.indexOf("msg.type === 'sidebarOpened'"),
+      bgSrc.indexOf("msg.type === 'sidebarOpened'") + 400,
+    );
+    expect(handler).toContain('chrome.tabs.sendMessage');
+    expect(handler).toContain("{ type: 'sidebarOpened' }");
+  });
+
+  // Step 3: content.js fires gstack-extension-ready ONLY on sidebarOpened
+  test('step 3: content.js dispatches extension-ready on sidebarOpened message', () => {
+    expect(contentSrc).toContain("msg.type === 'sidebarOpened'");
     expect(contentSrc).toContain("new CustomEvent('gstack-extension-ready')");
+  });
+
+  test('step 3: content.js does NOT auto-fire extension-ready on load', () => {
+    // The old pattern was: fire immediately when content script loads.
+    // Now it should only fire when sidebarOpened message arrives.
+    // Check there's no top-level dispatchEvent outside the message handler.
+    const beforeListener = contentSrc.slice(0, contentSrc.indexOf('chrome.runtime.onMessage'));
+    expect(beforeListener).not.toContain("dispatchEvent(new CustomEvent('gstack-extension-ready'))");
+  });
+
+  // Step 4: welcome page hides arrow on gstack-extension-ready
+  test('step 4: welcome page hides arrow on gstack-extension-ready event', () => {
+    expect(welcomeSrc).toContain("'gstack-extension-ready'");
+    expect(welcomeSrc).toContain("classList.add('hidden')");
+  });
+
+  test('step 4: welcome page does NOT auto-hide via status pill polling', () => {
+    // The old fallback (checkPill/gstack-status-pill) would hide the arrow
+    // as soon as the content script injected the pill, even without sidebar open.
+    expect(welcomeSrc).not.toContain('checkPill');
+    expect(welcomeSrc).not.toContain('gstack-status-pill');
   });
 });
 
