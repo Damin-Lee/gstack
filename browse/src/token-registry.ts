@@ -40,6 +40,7 @@ export const SCOPE_READ = new Set([
   'snapshot', 'text', 'html', 'links', 'forms', 'accessibility',
   'console', 'network', 'perf', 'dialog', 'is', 'inspect',
   'url', 'tabs', 'status', 'screenshot', 'pdf', 'css', 'attrs',
+  'media', 'data',
 ]);
 
 /** Commands that modify page state or navigate */

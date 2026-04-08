@@ -16,6 +16,7 @@ export const READ_COMMANDS = new Set([
   'console', 'network', 'cookies', 'storage', 'perf',
   'dialog', 'is',
   'inspect',
+  'media', 'data',
 ]);
 
 export const WRITE_COMMANDS = new Set([
@@ -46,6 +47,7 @@ export const ALL_COMMANDS = new Set([...READ_COMMANDS, ...WRITE_COMMANDS, ...MET
 export const PAGE_CONTENT_COMMANDS = new Set([
   'text', 'html', 'links', 'forms', 'accessibility', 'attrs',
   'console', 'dialog',
+  'media', 'data',
 ]);
 
 /** Wrap output from untrusted-content commands with trust boundary markers */
@@ -70,6 +72,8 @@ export const COMMAND_DESCRIPTIONS: Record<string, { category: string; descriptio
   'links':   { category: 'Reading', description: 'All links as "text → href"' },
   'forms':   { category: 'Reading', description: 'Form fields as JSON' },
   'accessibility': { category: 'Reading', description: 'Full ARIA tree' },
+  'media':   { category: 'Reading', description: 'All media elements (images, videos, audio) with URLs, dimensions, types', usage: 'media [--images|--videos|--audio] [selector]' },
+  'data':    { category: 'Reading', description: 'Structured data: JSON-LD, Open Graph, Twitter Cards, meta tags', usage: 'data [--jsonld|--og|--meta|--twitter]' },
   // Inspection
   'js':      { category: 'Inspection', description: 'Run JavaScript expression and return result as string', usage: 'js <expr>' },
   'eval':    { category: 'Inspection', description: 'Run JavaScript from file and return result as string (path must be under /tmp or cwd)', usage: 'eval <file>' },

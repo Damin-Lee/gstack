@@ -383,6 +383,76 @@ export async function handleReadCommand(
       return formatInspectorResult(result, { includeUA });
     }
 
+    case 'media': {
+      const { extractMedia } = await import('./media-extract');
+      const target = bm.getActiveFrameOrPage();
+      const filter = args.includes('--images') ? 'images' as const
+        : args.includes('--videos') ? 'videos' as const
+        : args.includes('--audio') ? 'audio' as const
+        : undefined;
+      const selectorArg = args.find(a => !a.startsWith('--'));
+      const result = await extractMedia(target, { selector: selectorArg, filter });
+      return JSON.stringify(result, null, 2);
+    }
+
+    case 'data': {
+      const target = bm.getActiveFrameOrPage();
+      const wantJsonLd = args.includes('--jsonld') || args.length === 0;
+      const wantOg = args.includes('--og') || args.length === 0;
+      const wantTwitter = args.includes('--twitter') || args.length === 0;
+      const wantMeta = args.includes('--meta') || args.length === 0;
+
+      const result = await target.evaluate(({ wantJsonLd, wantOg, wantTwitter, wantMeta }) => {
+        const data: Record<string, any> = {};
+
+        if (wantJsonLd) {
+          const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+          const jsonLd: any[] = [];
+          scripts.forEach(s => {
+            try { jsonLd.push(JSON.parse(s.textContent || '')); } catch {}
+          });
+          data.jsonLd = jsonLd;
+        }
+
+        if (wantOg) {
+          const og: Record<string, string> = {};
+          document.querySelectorAll('meta[property^="og:"]').forEach(m => {
+            const prop = m.getAttribute('property')?.replace('og:', '') || '';
+            og[prop] = m.getAttribute('content') || '';
+          });
+          data.openGraph = og;
+        }
+
+        if (wantTwitter) {
+          const tw: Record<string, string> = {};
+          document.querySelectorAll('meta[name^="twitter:"]').forEach(m => {
+            const name = m.getAttribute('name')?.replace('twitter:', '') || '';
+            tw[name] = m.getAttribute('content') || '';
+          });
+          data.twitterCards = tw;
+        }
+
+        if (wantMeta) {
+          const meta: Record<string, string> = {};
+          const canonical = document.querySelector('link[rel="canonical"]');
+          if (canonical) meta.canonical = canonical.getAttribute('href') || '';
+          const desc = document.querySelector('meta[name="description"]');
+          if (desc) meta.description = desc.getAttribute('content') || '';
+          const keywords = document.querySelector('meta[name="keywords"]');
+          if (keywords) meta.keywords = keywords.getAttribute('content') || '';
+          const author = document.querySelector('meta[name="author"]');
+          if (author) meta.author = author.getAttribute('content') || '';
+          const title = document.querySelector('title');
+          if (title) meta.title = title.textContent || '';
+          data.meta = meta;
+        }
+
+        return data;
+      }, { wantJsonLd, wantOg, wantTwitter, wantMeta });
+
+      return JSON.stringify(result, null, 2);
+    }
+
     default:
       throw new Error(`Unknown read command: ${command}`);
   }
