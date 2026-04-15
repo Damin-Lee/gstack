@@ -76,7 +76,7 @@ gstack/
 │   ├── host-config.ts     # HostConfig interface + validator
 │   ├── host-config-export.ts  # Shell bridge for setup script
 │   ├── host-adapters/     # Host-specific adapters (OpenClaw tool mapping)
-│   ├── resolvers/   # Template resolver modules (preamble, design, review, etc.)
+│   ├── resolvers/   # Template resolver modules (preamble, design, review, gbrain, etc.)
 │   ├── skill-check.ts     # Health dashboard
 │   └── dev-skill.ts       # Watch mode
 ├── test/            # Skill validation + eval tests
