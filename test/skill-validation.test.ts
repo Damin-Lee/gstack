@@ -1004,7 +1004,7 @@ describe('Test Bootstrap ({{TEST_BOOTSTRAP}}) integration', () => {
   test('TEST_BOOTSTRAP appears in ship/SKILL.md', () => {
     const content = fs.readFileSync(path.join(ROOT, 'ship', 'SKILL.md'), 'utf-8');
     expect(content).toContain('Test Framework Bootstrap');
-    expect(content).toContain('Step 2.5');
+    expect(content).toContain('Step 4');
   });
 
   test('TEST_BOOTSTRAP appears in design-review/SKILL.md', () => {
@@ -1099,9 +1099,9 @@ describe('Phase 8e.5 regression test generation', () => {
 // --- Step 3.4 coverage audit validation ---
 
 describe('Step 3.4 test coverage audit', () => {
-  test('ship/SKILL.md contains Step 3.4', () => {
+  test('ship/SKILL.md contains Step 7', () => {
     const content = fs.readFileSync(path.join(ROOT, 'ship', 'SKILL.md'), 'utf-8');
-    expect(content).toContain('Step 3.4: Test Coverage Audit');
+    expect(content).toContain('Step 7: Test Coverage Audit');
     expect(content).toContain('CODE PATH COVERAGE');
   });
 
@@ -1126,7 +1126,7 @@ describe('Step 3.4 test coverage audit', () => {
 
   test('ship rules include test generation rule', () => {
     const content = fs.readFileSync(path.join(ROOT, 'ship', 'SKILL.md'), 'utf-8');
-    expect(content).toContain('Step 3.4 generates coverage tests');
+    expect(content).toContain('Step 7 generates coverage tests');
     expect(content).toContain('Never commit failing tests');
   });
 
