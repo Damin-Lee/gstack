@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.18.4.0] - 2026-04-18
+
+### Fixed
+- **Apple Silicon no longer dies with SIGKILL on first run.** `./setup` now ad-hoc codesigns every compiled binary after `bun run build` so M-series Macs can actually execute them. If you cloned gstack and saw `zsh: killed ./browse/dist/browse` before getting to Day 2, this is why. Thanks to @voidborne-d (#1003) for tracking down the Bun `--compile` linker signature issue and shipping a tested fix (6 tests across 4 binaries, idempotent, platform-guarded).
+- **`/codex` no longer hangs forever in Claude Code's Bash tool.** Codex CLI 0.120.0 introduced a stdin deadlock: if stdin is a non-TTY pipe (Claude Code, CI, background bash, OpenClaw), `codex exec` waits for EOF to append it as a `<stdin>` block, even when the prompt is passed as a positional argument. Symptom: "Reading additional input from stdin...", 0% CPU, no output. Every `codex exec` and `codex review` now redirects stdin from `/dev/null`. `/autoplan`, every plan-review outside voice, `/ship` adversarial, and `/review` adversarial all unblock. Thanks to @loning (#972) for the 13-minute repro and minimal fix.
+- **`/codex` and `/autoplan` fail fast when Codex auth is missing or broken.** Before this release, a logged-out Codex user would watch the skill spend minutes building an expensive prompt only to surface the auth error mid-stream. Now both skills preflight auth via a multi-signal probe (`$CODEX_API_KEY`, `$OPENAI_API_KEY`, or `${CODEX_HOME:-~/.codex}/auth.json`) and stop with a clear "run `codex login` or set `$CODEX_API_KEY`" message before any prompt construction. Bonus: if your Codex CLI is on a known-buggy version (currently 0.120.0-0.120.2), you'll get a one-line nudge to upgrade.
+- **`/codex` and `/autoplan` no longer sit at 0% CPU forever if the model API stalls.** Every `codex exec` / `codex review` now runs under a 10-minute timeout wrapper with a `gtimeout → timeout → unwrapped` fallback chain, so you get a clear "Codex stalled past 10 minutes. Common causes: model API stall, long prompt, network issue. Try re-running." message instead of an infinite wait. `./setup` auto-installs `coreutils` on macOS so `gtimeout` is available (skip with `GSTACK_SKIP_COREUTILS=1` for CI / locked machines).
+- **`/codex` Challenge mode now surfaces auth errors instead of silently dropping them.** Challenge mode was piping stderr to `/dev/null`, which masked any auth failures in the middle of a run. Now it captures stderr to a temp file and checks for `auth|login|unauthorized` patterns. If Codex errors mid-run, you see it.
+- **Plan reviews no longer quietly bias toward minimal-diff recommendations.** `/plan-ceo-review` and `/plan-eng-review` used to list "minimal diff" as an engineering preference without a counterbalancing "rewrite is fine when warranted" note. Reviewers picked up on that and rejected rewrites that should've been approved. The preference is now framed as "right-sized diff" with explicit permission to recommend a rewrite when the existing foundation is broken. Implementation alternatives in CEO review also got an equal-weight clarification: don't default to minimal viable just because it's smaller.
+
+### For contributors
+- New `bin/gstack-codex-probe` consolidates the auth probe, version check, timeout wrapper, and telemetry logger into one bash helper that `/codex` and `/autoplan` both source. When a second outside-voice backend lands (Gemini CLI), this is the file to extend.
+- New `test/codex-hardening.test.ts` ships 25 deterministic unit tests for the probe (8 auth probe combinations, 10 version regex cases including `0.120.10` false-positive guards, 4 timeout wrapper + namespace hygiene checks, 3 telemetry payload schema checks confirming no env values leak into events). Free tier, <5s runtime.
+- New `test/skill-e2e-autoplan-dual-voice.test.ts` (periodic tier) gates the `/autoplan` dual-voice path. Asserts both Claude subagent and Codex voices produce output in Phase 1, OR that `[codex-unavailable]` is logged when Codex is absent. Periodic ~= $1/run, not a gate.
+- Codex failure telemetry events (`codex_timeout`, `codex_auth_failed`, `codex_cli_missing`, `codex_version_warning`) now land in `~/.gstack/analytics/skill-usage.jsonl` behind the existing user opt-in. Reliability regressions are visible at the user-base scale.
+- Codex timeouts (`exit 124`) now auto-log operational learnings via `gstack-learnings-log`. Future `/investigate` sessions on the same skill/branch surface prior hang patterns automatically.
+
 ## [0.18.3.0] - 2026-04-17
 
 ### Added
