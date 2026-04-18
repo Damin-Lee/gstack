@@ -56,6 +56,13 @@ echo "TEL_PROMPTED: $_TEL_PROMPTED"
 # Question tuning (opt-in; see /plan-tune + docs/designs/PLAN_TUNING_V0.md)
 _QUESTION_TUNING=$(~/.claude/skills/gstack/bin/gstack-config get question_tuning 2>/dev/null || echo "false")
 echo "QUESTION_TUNING: $_QUESTION_TUNING"
+# Writing style (V1: default = ELI10-style, terse = V0 prose. See docs/designs/PLAN_TUNING_V1.md)
+_EXPLAIN_LEVEL=$(~/.claude/skills/gstack/bin/gstack-config get explain_level 2>/dev/null || echo "default")
+if [ "$_EXPLAIN_LEVEL" != "default" ] && [ "$_EXPLAIN_LEVEL" != "terse" ]; then _EXPLAIN_LEVEL="default"; fi
+echo "EXPLAIN_LEVEL: $_EXPLAIN_LEVEL"
+# V1 upgrade migration pending-prompt flag
+_WRITING_STYLE_PENDING=$([ -f ~/.gstack/.writing-style-prompt-pending ] && echo "yes" || echo "no")
+echo "WRITING_STYLE_PENDING: $_WRITING_STYLE_PENDING"
 mkdir -p ~/.gstack/analytics
 if [ "$_TEL" != "off" ]; then
 echo '{"skill":"checkpoint","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","repo":"'$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")'"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
@@ -116,6 +123,29 @@ of `/qa`, `/gstack-ship` instead of `/ship`). Disk paths are unaffected — alwa
 `~/.claude/skills/gstack/[skill-name]/SKILL.md` for reading skill files.
 
 If output shows `UPGRADE_AVAILABLE <old> <new>`: read `~/.claude/skills/gstack/gstack-upgrade/SKILL.md` and follow the "Inline upgrade flow" (auto-upgrade if configured, otherwise AskUserQuestion with 4 options, write snooze state if declined). If `JUST_UPGRADED <from> <to>`: tell user "Running gstack v{to} (just updated!)" and continue.
+
+If `WRITING_STYLE_PENDING` is `yes`: You're on the first skill run after upgrading
+to gstack v1. Ask the user once about the new default writing style. Use AskUserQuestion:
+
+> v1 prompts = simpler. Technical terms get a one-sentence gloss on first use,
+> questions are framed in outcome terms, sentences are shorter.
+>
+> Keep the new default, or prefer the older tighter prose?
+
+Options:
+- A) Keep the new default (recommended — good writing helps everyone)
+- B) Restore V0 prose — set `explain_level: terse`
+
+If A: leave `explain_level` unset (defaults to `default`).
+If B: run `~/.claude/skills/gstack/bin/gstack-config set explain_level terse`.
+
+Always run (regardless of choice):
+```bash
+rm -f ~/.gstack/.writing-style-prompt-pending
+touch ~/.gstack/.writing-style-prompted
+```
+
+This only happens once. If `WRITING_STYLE_PENDING` is `no`, skip this entirely.
 
 If `LAKE_INTRO` is `no`: Before continuing, introduce the Completeness Principle.
 Tell the user: "gstack follows the **Boil the Lake** principle — always do the complete
@@ -371,6 +401,101 @@ available]. [Health score if available]." Keep it to 2-3 sentences.
 Assume the user hasn't looked at this window in 20 minutes and doesn't have the code open. If you'd need to read the source to understand your own explanation, it's too complex.
 
 Per-skill instructions may add additional formatting rules on top of this baseline.
+
+## Writing Style (skip entirely if `EXPLAIN_LEVEL: terse` appears in the preamble echo OR the user's current message explicitly requests terse / no-explanations output)
+
+These rules apply to every AskUserQuestion, every response you write to the user, and every review finding. They compose with the AskUserQuestion Format section above: Format = *how* a question is structured; Writing Style = *the prose quality of the content inside it*.
+
+1. **Jargon gets a one-sentence gloss on first use per skill invocation.** Even if the user's own prompt already contained the term — users often paste jargon from someone else's plan. Gloss unconditionally on first use. No cross-invocation memory: a new skill fire is a new first-use opportunity. Example: "race condition (two things happen at the same time and step on each other)".
+2. **Frame questions in outcome terms, not implementation terms.** Bad: "Is this endpoint idempotent?" Good: "If someone double-clicks the button, is it OK for the action to run twice?" Ask the question the user would actually want to answer.
+3. **Short sentences. Concrete nouns. Active voice.** Standard advice from any good writing guide. Prefer "the cache stores the result for 60s" over "results will have been cached for a period of 60s."
+4. **Close every decision with user impact.** Connect the technical call back to who's affected. "If we skip this, your users will see a 3-second spinner on every page load." Make the user's user real.
+5. **User-turn override.** If the user's current message says "be terse" / "no explanations" / "brutally honest, just the answer" / similar, skip this entire Writing Style block for your next response, regardless of config. User's in-turn request wins.
+6. **Glossary boundary is the curated list.** Terms below get glossed. Terms not on the list are assumed plain-English enough. If you see a term that genuinely needs glossing but isn't listed, note it (once) in your response so it can be added via PR.
+
+**Jargon list** (gloss each on first use per skill invocation, if the term appears in your output):
+
+- idempotent
+- idempotency
+- race condition
+- deadlock
+- cyclomatic complexity
+- N+1
+- N+1 query
+- backpressure
+- memoization
+- eventual consistency
+- CAP theorem
+- CORS
+- CSRF
+- XSS
+- SQL injection
+- prompt injection
+- DDoS
+- rate limit
+- throttle
+- circuit breaker
+- load balancer
+- reverse proxy
+- SSR
+- CSR
+- hydration
+- tree-shaking
+- bundle splitting
+- code splitting
+- hot reload
+- tombstone
+- soft delete
+- cascade delete
+- foreign key
+- composite index
+- covering index
+- OLTP
+- OLAP
+- sharding
+- replication lag
+- quorum
+- two-phase commit
+- saga
+- outbox pattern
+- inbox pattern
+- optimistic locking
+- pessimistic locking
+- thundering herd
+- cache stampede
+- bloom filter
+- consistent hashing
+- virtual DOM
+- reconciliation
+- closure
+- hoisting
+- tail call
+- GIL
+- zero-copy
+- mmap
+- cold start
+- warm start
+- green-blue deploy
+- canary deploy
+- feature flag
+- kill switch
+- dead letter queue
+- fan-out
+- fan-in
+- debounce
+- throttle (UI)
+- hydration mismatch
+- memory leak
+- GC pause
+- heap fragmentation
+- stack overflow
+- null pointer
+- dangling pointer
+- buffer overflow
+
+Terms not on this list are assumed plain-English enough.
+
+Terse mode (EXPLAIN_LEVEL: terse): skip this entire section. Emit output in V0 prose style — no glosses, no outcome-framing layer, shorter responses. Power users who know the terms get tighter output this way.
 
 ## Completeness Principle — Boil the Lake
 
