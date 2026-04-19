@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.4.0.0] - 2026-04-19
+
+## **Your sidebar agent now defends itself against prompt injection.**
+
+Open a web page with hidden malicious instructions, gstack's sidebar doesn't just trust that Claude will do the right thing. A 22MB ML classifier bundled with the browser scans every page you load, every tool output, every message you send. If it looks like a prompt injection attack, the session stops before Claude executes anything dangerous. A secret canary token in the system prompt catches attempts to exfil your session, if that token shows up anywhere in Claude's output, tool arguments, URLs, or file writes, the session terminates and you see exactly which layer fired and at what confidence. Attempts go to a local log you can read, and optionally to aggregate community telemetry so every gstack user becomes a sensor for defense improvements.
+
+### What changes for you
+
+Open the Chrome sidebar and you'll see a small `SEC` badge in the top right. Green means the full defense stack is loaded. Amber means something degraded (model warmup still running on first-ever use, about 30s). Red means the security module itself crashed and you're running on architectural controls only. Hover for per-layer detail.
+
+If an attack fires, a centered alert-heavy banner appears, "Session terminated, prompt injection detected from {domain}". Expand "What happened" and you see the exact classifier scores. Restart with one click. No mystery.
+
+### The numbers
+
+| Metric | Before v1.4 | After v1.4 |
+|---|---|---|
+| Defense layers | 4 (content-security.ts) | **8** (adds ML content, ML transcript, canary, verdict combiner) |
+| Attack channels covered by canary | 0 | **5** (text stream, tool args, URLs, file writes, subprocess args) |
+| First-party classifier cost | none | **$0** (bundled, runs locally) |
+| Model size shipped | 0 | **22MB** (TestSavantAI BERT-small, int8 quantized) |
+| Optional ensemble model | none | **721MB DeBERTa-v3** (opt-in via `GSTACK_SECURITY_ENSEMBLE=deberta`) |
+| BLOCK decision rule | none | **2-of-2 ML agreement** (or 2-of-3 with ensemble), prevents single-classifier false positives from killing sessions |
+| Tests covering security surface | 12 | **243** (25 foundation + 23 adversarial + 10 integration + 9 classifier + 7 Playwright + 3 bench + 6 bun-native + others) |
+| Attack telemetry aggregation | local file only | **community-pulse edge function + gstack-security-dashboard CLI** |
+
+### What actually ships
+
+* **security.ts** — canary injection plus check, verdict combiner with ensemble rule, attack log with rotation, cross-process session state, device-salted payload hashing
+* **security-classifier.ts** — TestSavantAI (default) plus Claude Haiku transcript check plus opt-in DeBERTa-v3 ensemble, all with graceful fail-open
+* **Pre-spawn ML scan** on every user message plus tool output scan on every Read, Glob, Grep, WebFetch, Bash result
+* **Shield icon** with 3 states (green, amber, red) updating continuously via `/sidebar-chat` poll
+* **Canary leak banner** (centered alert-heavy, per approved design mockup) with expandable layer-score detail
+* **Attack telemetry** via existing `gstack-telemetry-log` to `community-pulse` to Supabase pipe (tier-gated, community uploads, anonymous local-only, off is no-op)
+* **`gstack-security-dashboard` CLI** — attacks detected last 7 days, top attacked domains, layer distribution, verdict split
+* **BrowseSafe-Bench smoke harness** — 200 cases from Perplexity's 3,680-case adversarial dataset, cached hermetically, gates on signal separation
+* **Live Playwright integration test** pins the L1 through L6 defense-in-depth contract
+* **Bun-native classifier research skeleton** plus design doc — WordPiece tokenizer matching transformers.js output, benchmark harness, FFI roadmap for future 5ms native inference
+
+### Env knobs
+
+* `GSTACK_SECURITY_OFF=1` — emergency kill switch (canary still injected, ML skipped)
+* `GSTACK_SECURITY_ENSEMBLE=deberta` — opt-in 721MB DeBERTa-v3 ensemble classifier for 2-of-3 agreement
+
+### For contributors
+
+Supabase migration `004_attack_telemetry.sql` adds five nullable columns to `telemetry_events` (`security_url_domain`, `security_payload_hash`, `security_confidence`, `security_layer`, `security_verdict`) plus two partial indices for dashboard aggregation. `community-pulse` edge function aggregates the security section. Run `cd supabase && ./verify-rls.sh` and deploy via your normal Supabase deploy flow.
+
+---
+
 ## [1.3.0.0] - 2026-04-19
 
 ## **Your design skills learn your taste.**
