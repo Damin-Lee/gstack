@@ -247,7 +247,7 @@ function summarizeToolInput(tool: string, input: any): string {
  * text deltas, tool_use arguments (including nested URL/path/command strings),
  * and result payloads.
  */
-function detectCanaryLeak(event: any, canary: string): string | null {
+function detectCanaryLeak(event: any, canary: string, buf?: DeltaBuffer): string | null {
   if (!canary) return null;
 
   if (event.type === 'assistant' && event.message?.content) {
@@ -266,14 +266,29 @@ function detectCanaryLeak(event: any, canary: string): string | null {
     }
   }
   if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-    if (typeof event.delta.text === 'string' && event.delta.text.includes(canary)) {
-      return 'text_delta';
+    if (typeof event.delta.text === 'string') {
+      // Rolling buffer: an attacker can ask Claude to emit the canary split
+      // across two deltas (e.g., "CANARY-" then "ABCDEF"). A per-delta
+      // substring check misses this. Concatenate the previous tail with
+      // this chunk and search, then trim the tail to last canary.length-1
+      // chars for the next event.
+      const combined = buf ? buf.text_delta + event.delta.text : event.delta.text;
+      if (combined.includes(canary)) return 'text_delta';
+      if (buf) buf.text_delta = combined.slice(-(canary.length - 1));
     }
   }
   if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
-    if (typeof event.delta.partial_json === 'string' && event.delta.partial_json.includes(canary)) {
-      return 'tool_input_delta';
+    if (typeof event.delta.partial_json === 'string') {
+      const combined = buf ? buf.input_json_delta + event.delta.partial_json : event.delta.partial_json;
+      if (combined.includes(canary)) return 'tool_input_delta';
+      if (buf) buf.input_json_delta = combined.slice(-(canary.length - 1));
     }
+  }
+  if (event.type === 'content_block_stop' && buf) {
+    // Block boundary — reset the rolling buffer so a canary straddling
+    // two independent tool_use blocks isn't inferred.
+    buf.text_delta = '';
+    buf.input_json_delta = '';
   }
   if (event.type === 'result' && typeof event.result === 'string' && event.result.includes(canary)) {
     return 'result';
@@ -281,10 +296,17 @@ function detectCanaryLeak(event: any, canary: string): string | null {
   return null;
 }
 
+/** Rolling-window tails for delta canary detection. See detectCanaryLeak. */
+interface DeltaBuffer {
+  text_delta: string;
+  input_json_delta: string;
+}
+
 interface CanaryContext {
   canary: string;
   pageUrl: string;
   onLeak: (channel: string) => void;
+  deltaBuf: DeltaBuffer;
 }
 
 interface ToolResultScanContext {
@@ -327,7 +349,7 @@ async function handleStreamEvent(event: any, tabId?: number, canaryCtx?: CanaryC
   // Canary check runs BEFORE any outbound send — we never want to relay
   // a leaked token to the sidepanel UI.
   if (canaryCtx) {
-    const channel = detectCanaryLeak(event, canaryCtx.canary);
+    const channel = detectCanaryLeak(event, canaryCtx.canary, canaryCtx.deltaBuf);
     if (channel) {
       canaryCtx.onLeak(channel);
       return; // drop the event — never relay content that leaked the canary
@@ -579,6 +601,7 @@ async function askClaude(queueEntry: QueueEntry): Promise<void> {
       canaryCtx = {
         canary,
         pageUrl: pageUrl ?? '',
+        deltaBuf: { text_delta: '', input_json_delta: '' },
         onLeak: (channel: string) => {
           if (canaryTriggered) return;
           canaryTriggered = true;
@@ -613,9 +636,10 @@ async function askClaude(queueEntry: QueueEntry): Promise<void> {
           signals.push(await checkTranscript({
             user_message: queueEntry.message ?? '',
             tool_calls: [{ tool_name: toolName, tool_input: {} }],
+            tool_output: text,
           }));
         }
-        const result = combineVerdict(signals);
+        const result = combineVerdict(signals, { toolOutput: true });
         if (result.verdict !== 'block') return;
         toolResultBlockFired = true;
         const domain = extractDomain(pageUrl ?? '');
