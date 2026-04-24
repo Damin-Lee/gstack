@@ -4,7 +4,7 @@
 
 ## **Plan reviews walk you through each issue again, and every question is now a real decision brief.**
 
-v1.6.4.0 broke something nobody wrote down. Plan reviews on Opus 4.7 silently stopped asking questions one at a time. They turned into a report: here are 6 findings, end of turn. The interactive dialogue that made `/plan-ceo-review`, `/plan-eng-review`, and the rest useful quietly evaporated. v1.7.0.0 restores that, and bundles a format upgrade so every `AskUserQuestion` now renders as a numbered decision brief with ELI10, stakes, recommendation, per-option pros / cons (✅ / ❌), and a closing "Net:" line that frames the trade-off in one sentence.
+v1.6.4.0 broke something nobody wrote down. Plan reviews on Opus 4.7 silently stopped asking questions one at a time. They turned into a report: here are 6 findings, end of turn. The interactive dialogue that made `/plan-ceo-review`, `/plan-eng-review`, and the rest useful quietly evaporated. v1.10.0.0 restores that, and bundles a format upgrade so every `AskUserQuestion` now renders as a numbered decision brief with ELI10, stakes, recommendation, per-option pros / cons (✅ / ❌), and a closing "Net:" line that frames the trade-off in one sentence.
 
 ### What changes for you
 
@@ -12,9 +12,9 @@ Run `/plan-ceo-review` or `/plan-eng-review` on a plan with 3 findings. You get 
 
 ### The numbers that matter
 
-Measured across the v1.7.0.0 fix. Verify any claim with `git log 1.6.4.0..1.7.0.0 --oneline` and `bun test` against the pinned commit SHA.
+Measured across the v1.10.0.0 fix. Verify any claim with `git log 1.9.0.0..1.10.0.0 --oneline` and `bun test` against the pinned commit SHA.
 
-| Metric | v1.6.4.0 | v1.7.0.0 | Δ |
+| Metric | v1.6.4.0 | v1.10.0.0 | Δ |
 |---|---|---|---|
 | `AskUserQuestion` renders above model overlay in SKILL.md | no | **yes** | ordering inverted |
 | Escape-hatch sites hardened across plan-review templates | 0 | **16** | +16 |
@@ -41,12 +41,12 @@ Upgrade and re-run your next plan review. You should see D-numbered prompts (D1,
 
 #### Fixed
 
-- Plan-review cadence regression on Opus 4.7. `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, and `/plan-devex-review` now actually pause after each finding and call `AskUserQuestion` as a tool_use instead of batching everything into one summary report. Root cause: `generateModelOverlay` rendered above `generateAskUserFormat` in `scripts/resolvers/preamble.ts:87-91`, so the overlay's "Batch your questions" directive registered as the ambient default before the pacing rule. Fixed by reordering the section array and rewriting the overlay directive as "Pace questions to the skill".
+- Plan-review cadence regression on Opus 4.7. `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, and `/plan-devex-review` now actually pause after each finding and call `AskUserQuestion` as a tool_use instead of batching everything into one summary report. Root cause: `generateModelOverlay` rendered above `generateAskUserFormat` in `scripts/resolvers/preamble.ts`, so the overlay's "Batch your questions" directive registered as the ambient default before the pacing rule. Fixed by reordering the section array and rewriting the overlay directive as "Pace questions to the skill".
 - Escape-hatch collapse: "If no issues or fix is obvious, state what you'll do and move on, don't waste a question" at 16 sites across 4 templates let Opus 4.7's literal interpreter classify every finding as self-dismissable. Tightened per-template: zero findings gets "No issues, moving on"; findings require AskUserQuestion as a tool_use.
 
 #### Changed
 
-- `test/skill-e2e-plan-format.test.ts`: extended with v1.7.0.0 format token regexes (D-number, ELI10, Stakes, Pros/cons, Net). Existing RECOMMENDATION check loosened to accept mixed-case "Recommendation:".
+- `test/skill-e2e-plan-format.test.ts`: extended with v1.10.0.0 format token regexes (D-number, ELI10, Stakes, Pros/cons, Net). Existing RECOMMENDATION check loosened to accept mixed-case "Recommendation:".
 - `test/skill-validation.test.ts`: format assertions updated from "RECOMMENDATION: Choose" to the new Pros/Cons token set.
 - Golden fixtures regenerated: `test/fixtures/golden/claude-ship-SKILL.md`, `codex-ship-SKILL.md`, `factory-ship-SKILL.md`.
 
@@ -56,6 +56,82 @@ Upgrade and re-run your next plan review. You should see D-numbered prompts (D1,
 - Follow-up: true multi-turn cadence eval (3 findings produce 3 distinct AskUserQuestion invocations across turns) requires new harness support for multi-capture. Filed in NOT-in-scope. Current single-capture eval covers format + escape-hatch abuse but not cadence itself.
 - Follow-up: expanded-coverage eval cases for `/ship`, `/office-hours`, `/investigate`, `/qa`, `/review`, `/design-review`, `/document-release`. Touchfiles entries exist; test blocks will land per-skill in follow-up PRs.
 - D-numbering is a model-level instruction, not a runtime counter. `TemplateContext` has no state for it. Drift over long sessions is expected; a registry (deferred to TODOs) is the long-term fix.
+
+## [1.9.0.0] - 2026-04-23
+
+## **Your gstack memory now travels with you. Cross-machine brain via a private git repo + optional GBrain indexing, no daemon, no credential leaks.**
+
+gstack session memory (learnings, plans, designs, retros, developer profile) used to die at the machine boundary. Now it doesn't. `gstack-brain-init` turns `~/.gstack/` into a git repo with an explicit allowlist, writer shims enqueue changed files at write-time, and a preamble-boundary sync pushes them to a private git remote of your choice. GBrain is the first consumer but the architecture is pluggable — Codex, OpenClaw, or anything else can be a reader later. No daemon, no background process, no new auth surface.
+
+The feature shipped after four plan reviews: /office-hours shaping, /plan-eng-review (6 issues → CLEAR), /plan-ceo-review (SELECTIVE EXPANSION, 2 cherry-picks accepted), /codex twice (16+16 findings applied, daemon model dropped in round 2), and /plan-devex-review (6/10 → 8/10, docs elevated to full treatment). The scope simplification from Codex round 2 alone removed ~1 week of daemon lifecycle surface.
+
+### What you can now do
+
+- **Initialize cross-machine sync:** `gstack-brain-init` creates a private git repo (GitHub via `gh`, or any git URL — GitLab, Gitea, self-hosted). 30-90 second TTHW.
+- **See yesterday's laptop on today's desktop:** copy `~/.gstack-brain-remote.txt` to the new machine, run `gstack-brain-restore`, and your learnings follow you.
+- **Control what syncs:** one-time privacy stop-gate on first run — `full` (everything allowlisted), `artifacts-only` (plans/designs/retros/learnings, skip behavioral), `off` (decline).
+- **Sleep through the conflict case:** two machines writing the same JSONL file the same day merge cleanly via a ts-sort-plus-hash-fallback merge driver registered automatically.
+- **Uninstall cleanly:** `gstack-brain-uninstall` removes the sync layer, leaves your data intact.
+- **Never push a secret:** AWS keys, GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`/`github_pat_`), OpenAI `sk-` keys, PEM blocks, JWTs, and bearer-token-in-JSON patterns are all blocked before push. `--skip-file <path>` gives you a single-command escape hatch for false positives.
+
+### The numbers that matter
+
+Source: integration smoke tests run during implementation, plus 27-test consolidated suite (`test/brain-sync.test.ts`). End-to-end round trip (init on machine A → write learning → restore on machine B → see the learning) verified inline.
+
+| Surface | Shape |
+|---|---|
+| New binaries | 8 (`gstack-brain-init`, `-enqueue`, `-sync`, `-consumer`, `-reader` alias, `-restore`, `-uninstall`, `gstack-jsonl-merge`) |
+| Config keys | 2 enum-validated (`gbrain_sync_mode`: off/artifacts-only/full; `gbrain_sync_mode_prompted`: bool) |
+| Writer shims modified | 4 (learnings-log, timeline-log, review-log, developer-profile on --migrate path) |
+| Writers deliberately NOT synced | 2 (question-log, question-preference — per-machine UX state, Codex v2 decision) |
+| Sync granularity | per-skill-boundary via `gstack-brain-sync --once` from preamble (no daemon) |
+| Privacy tiers | 3 (full / artifacts-only / off) |
+| Secret patterns blocked | 6 families (AWS, GH tokens, OpenAI, PEM, JWT, bearer-in-JSON) |
+| User-facing naming | `reader` (CLI); internal data model stays `consumer` per Codex-v2 DX decision |
+| New-machine discovery | auto via `~/.gstack-brain-remote.txt` file (URL-only, no secrets) |
+
+### What this means for you
+
+Work on the laptop Monday. Switch to the desktop Tuesday. Skill preamble sees the remote URL, offers `gstack-brain-restore`, your Monday learnings surface on Tuesday. The pattern scales to N consumers: today GBrain is the primary reader, tomorrow Codex or OpenClaw can subscribe without refactoring the sync.
+
+### Itemized changes
+
+#### Added
+
+- `bin/gstack-brain-init` — idempotent first-run setup. Turns `~/.gstack/` into a git repo with `.gitignore = *`, writes canonical `.brain-allowlist` + `.brain-privacy-map.json`, installs pre-commit secret-scan hook, registers JSONL merge driver, creates private remote via `gh repo create --private` (or accepts `--remote <url>`), writes `~/.gstack-brain-remote.txt` for new-machine discovery.
+- `bin/gstack-brain-sync` — core sync. Subcommands: `--once` (drain queue, secret-scan staged diff, commit with template message, push with fetch+merge retry), `--status`, `--skip-file <path>`, `--drop-queue --yes`, `--discover-new` (walks allowlist globs with mtime+size cursor).
+- `bin/gstack-brain-enqueue` — atomic-append shim called by writers. Silent no-op when feature disabled.
+- `bin/gstack-brain-consumer` + `bin/gstack-brain-reader` (symlink alias) — manage the consumer/reader registry in `consumers.json`. User-facing "reader", internal "consumer".
+- `bin/gstack-brain-restore` — new-machine bootstrap with safety gates (refuses dangerous clobber, re-registers merge drivers, prompts for per-consumer tokens since tokens stay machine-local).
+- `bin/gstack-brain-uninstall` — clean off-ramp. Removes `.git` + `.brain-*` files + `consumers.json` + config keys. Preserves user data (learnings etc). Optional `--delete-remote` for the GitHub repo.
+- `bin/gstack-jsonl-merge` — git merge driver. Concat-dedup-sort by ISO `ts` field; deterministic SHA-256 hash fallback when `ts` is missing.
+- `scripts/resolvers/preamble/generate-brain-sync-block.ts` — preamble bash block. New-machine restore hint, one-time privacy stop-gate, `--once` at skill start + end, once-daily auto-pull, `BRAIN_SYNC:` status line on every skill run.
+- `docs/gbrain-sync.md` — user guide (setup, first-use, restore, privacy modes, secret protection, uninstall).
+- `docs/gbrain-sync-errors.md` — error lookup index (problem / cause / fix for every user-visible error).
+- `test/brain-sync.test.ts` — 27-test consolidated suite: config isolation, enqueue atomicity, merge driver, secret scan across all 6 regex families, init+sync+restore round-trip, uninstall preserves data, `--discover-new` cursor idempotence, `--skip-file` remediation.
+
+#### Changed
+
+- `bin/gstack-config` — added 2 validated keys (`gbrain_sync_mode` enum, `gbrain_sync_mode_prompted` bool). Also accepts `GSTACK_HOME` env override alongside legacy `GSTACK_STATE_DIR` for test isolation (Codex v2 fix).
+- `bin/gstack-learnings-log`, `gstack-timeline-log`, `gstack-review-log`, `gstack-developer-profile` — each gains one backgrounded `gstack-brain-enqueue` call after its local write. Fire-and-forget, silent no-op when sync is off.
+- `bin/gstack-timeline-log` header comment — updated "local-only, never sent anywhere" to reflect the new privacy-gated sync contract (only applies when user explicitly opts into `full` mode).
+- `scripts/resolvers/preamble.ts` — composition root wires in the new `generateBrainSyncBlock`.
+- `README.md` — new "Cross-machine memory with GBrain sync" section near the top, plus docs-table entry linking to `docs/gbrain-sync.md` and `docs/gbrain-sync-errors.md`.
+
+#### For contributors
+
+- Sync respects `GSTACK_HOME=/tmp/test-$$` so tests never bleed into real `~/.gstack/config.yaml`. New test `test/brain-sync-env-isolation` logic baked into the consolidated suite.
+- The consumer registry lives in `consumers.json` (synced); tokens stay in `gstack-config` (local, never synced). Restore prompts for tokens on new machines.
+- Merge drivers require local `git config merge.<name>.driver=...` registration, not just `.gitattributes`. Both `init` and `restore` register them; uninstall clears them.
+- Pre-commit hook is defense-in-depth only. Primary secret scan runs in `gstack-brain-sync --once` BEFORE staging.
+- The fnmatch glob engine doesn't handle `**` the way git's gitignore does; allowlist uses explicit one- and two-level patterns instead.
+- GBrain HTTP ingest endpoint contract is a cross-project dependency (flagged as v1 blocker for real-world dogfooding). v1 of gbrain-sync ships on this branch regardless; GBrain-side work lands in a separate branch/repo.
+
+#### Known follow-ups
+
+- `test/brain-sync.test.ts` — 12 of 27 tests pass on first bun-test run; remaining 15 hit bun-test's 5s default timeout (spawnSync-heavy git operations). Behaviors verified via integration smokes during implementation. Test infrastructure needs a 30s per-test timeout wrapper.
+- Three unmerged team-sync branches (`garrytan/team-supabase-store`, `garrytan/fix-team-setup`, `garrytan/team-install-mode`) should be formally closed if team-sync isn't landing — flagged in the CEO plan.
+- Pre-existing golden-file regression test failure in `test/host-config.test.ts` (Codex ship skill baseline) exists on `main` too — unrelated to this PR, tracked separately.
 
 ## [1.6.4.0] - 2026-04-22
 

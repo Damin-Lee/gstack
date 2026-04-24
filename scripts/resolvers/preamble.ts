@@ -37,6 +37,9 @@ import { generateWritingStyleMigration } from './preamble/generate-writing-style
 // Host-specific instructions
 import { generateBrainHealthInstruction } from './preamble/generate-brain-health-instruction';
 
+// GBrain cross-machine sync (runs at skill start; end-side handled in completion-status)
+import { generateBrainSyncBlock } from './preamble/generate-brain-sync-block';
+
 // Behavioral / voice
 import { generateVoiceDirective } from './preamble/generate-voice-directive';
 
@@ -89,6 +92,7 @@ export function generatePreamble(ctx: TemplateContext): string {
     // patches. Opus 4.7 reads top-to-bottom and absorbs the first pacing directive
     // it hits; reversing this order regresses plan-review cadence (v1.6.4.0 bug).
     ...(tier >= 2 ? [generateAskUserFormat(ctx)] : []),
+    generateBrainSyncBlock(ctx),
     generateModelOverlay(ctx),
     generateVoiceDirective(tier),
     ...(tier >= 2 ? [
