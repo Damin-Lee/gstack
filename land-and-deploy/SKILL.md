@@ -349,6 +349,135 @@ AI orchestrator (e.g., OpenClaw). In spawned sessions:
 - Focus on completing the task and reporting results via prose output.
 - End with a completion report: what shipped, decisions made, anything uncertain.
 
+## AskUserQuestion Format
+
+**ALWAYS follow this structure for every AskUserQuestion call. Every element is non-skippable. If you find yourself about to skip any of them, stop and back up.**
+
+### Required shape
+
+Every AskUserQuestion reads like a decision brief, not a bullet list:
+
+```
+D<N> — <one-line question title>
+
+ELI10: <plain English a 16-year-old could follow, 2-4 sentences, name the stakes>
+
+Stakes if we pick wrong: <one sentence on what breaks, what user sees, what's lost>
+
+Recommendation: <choice> because <one-line reason>
+
+Completeness: A=X/10, B=Y/10   (or: Note: options differ in kind, not coverage — no completeness score)
+
+Pros / cons:
+
+A) <option label> (recommended)
+  ✅ <pro — concrete, observable, ≥40 chars>
+  ✅ <pro>
+  ❌ <con — honest, ≥40 chars>
+
+B) <option label>
+  ✅ <pro>
+  ❌ <con>
+
+Net: <one-line synthesis of what you're actually trading off>
+```
+
+### Element rules
+
+1. **D-numbering.** First question in a skill invocation is `D1`. Increment per
+   question within the same skill. This is a model-level instruction, not a
+   runtime counter — you count your own questions. Nested skill invocation
+   (e.g., `/plan-ceo-review` running `/office-hours` inline) starts its own
+   D1; label as `D1 (office-hours)` to disambiguate when the user will see
+   both. Drift is expected over long sessions; minor inconsistency is fine.
+
+2. **Re-ground.** Before ELI10, state the project, current branch (use the
+   `_BRANCH` value from the preamble, NOT conversation history or gitStatus),
+   and the current plan/task. 1-2 sentences. Assume the user hasn't looked at
+   this window in 20 minutes.
+
+3. **ELI10 (ALWAYS).** Explain in plain English a smart 16-year-old could
+   follow. Concrete examples and analogies, not function names. Say what it
+   DOES, not what it's called. This is not preamble — the user is about to
+   make a decision and needs context. Even in terse mode, emit the ELI10.
+
+4. **Stakes if we pick wrong (ALWAYS).** One sentence naming what breaks in
+   concrete terms (pain avoided / capability unlocked / consequence named).
+   "Users see a 3-second spinner" beats "performance may degrade." Forces
+   the trade-off to be real.
+
+5. **Recommendation (ALWAYS).** `Recommendation: <choice> because <one-line
+   reason>` on its own line. Never omit it. Required for every AskUserQuestion,
+   even when neutral-posture (see rule 8). The `(recommended)` label on the
+   option is REQUIRED — `scripts/resolvers/question-tuning.ts` reads it to
+   power the AUTO_DECIDE path. Omitting it breaks auto-decide.
+
+6. **Completeness scoring (when meaningful).** When options differ in
+   coverage (full test coverage vs happy path vs shortcut, complete error
+   handling vs partial), score each `Completeness: N/10` on its own line.
+   Calibration: 10 = complete, 7 = happy path only, 3 = shortcut. Flag any
+   option ≤5 where a higher-completeness option exists. When options differ
+   in kind (review posture, architectural A-vs-B, cherry-pick Add/Defer/Skip,
+   two different kinds of systems), SKIP the score and write one line:
+   `Note: options differ in kind, not coverage — no completeness score.`
+   Do NOT fabricate filler scores — empty 10/10 on every option is worse
+   than no score.
+
+7. **Pros / cons block.** Every option gets per-bullet ✅ (pro) and ❌ (con)
+   markers. Rules:
+   - **Minimum 2 pros and 1 con per option.** If you can't name a con for
+     the recommended option, the recommendation is hollow — go find one. If
+     you can't name a pro for the rejected option, the question isn't real.
+   - **Minimum 40 characters per bullet.** `✅ Simple` is not a pro. `✅
+     Reuses the YAML frontmatter format already in MEMORY.md, zero new
+     parser` is a pro. Concrete, observable, specific.
+   - **Hard-stop escape** for genuinely one-sided choices (destructive-action
+     confirmation, one-way doors): a single bullet `✅ No cons — this is a
+     hard-stop choice` satisfies the rule. Use sparingly; overuse flips a
+     decision brief into theater.
+
+8. **Net line (ALWAYS).** Closes the decision with a one-sentence synthesis
+   of what the user is actually trading off. From the reference screenshot:
+   *"The new-format case is speculative. The copy-format case is immediate
+   leverage. Copy now, evolve later if a real pattern emerges."* Not a
+   summary — a verdict frame.
+
+9. **Neutral-posture handling.** When the skill explicitly says "neutral
+   recommendation posture" (SELECTIVE EXPANSION cherry-picks, taste calls,
+   kind-differentiated choices where neither side dominates), the
+   Recommendation line reads: `Recommendation: <default-choice> — this is a
+   taste call, no strong preference either way`. The `(recommended)` label
+   STAYS on the default option (machine-readable hint for AUTO_DECIDE). The
+   `— this is a taste call` prose is the human-readable neutrality signal.
+   Both coexist.
+
+10. **Effort both-scales.** When an option involves effort, show both human
+    and CC scales: `(human: ~2 days / CC: ~15 min)`.
+
+11. **Tool_use, not prose.** A markdown block labeled `Question:` is not a
+    question — the user never sees it as interactive. If you wrote one in
+    prose, stop and reissue as an actual AskUserQuestion tool_use. The rich
+    markdown goes in the question body; the `options` array stays short
+    labels (A, B, C).
+
+### Self-check before emitting
+
+Before calling AskUserQuestion, verify:
+- [ ] D<N> header present
+- [ ] ELI10 paragraph present (stakes line too)
+- [ ] Recommendation line present with concrete reason
+- [ ] Completeness scored (coverage) OR kind-note present (kind)
+- [ ] Every option has ≥2 ✅ and ≥1 ❌, each ≥40 chars (or hard-stop escape)
+- [ ] (recommended) label on one option (even for neutral-posture — see rule 9)
+- [ ] Net line closes the decision
+- [ ] You are calling the tool, not writing prose
+
+If you'd need to read the source to understand your own explanation, it's
+too complex — simplify before emitting.
+
+Per-skill instructions may add additional formatting rules on top of this
+baseline.
+
 ## GBrain Sync (skill start)
 
 ```bash
@@ -560,20 +689,6 @@ want /[next skill]."
 are shown, synthesize a one-paragraph welcome briefing before proceeding:
 "Welcome back to {branch}. Last session: /{skill} ({outcome}). [Checkpoint summary if
 available]. [Health score if available]." Keep it to 2-3 sentences.
-
-## AskUserQuestion Format
-
-**ALWAYS follow this structure for every AskUserQuestion call. All four elements are non-skippable. If you find yourself about to skip any of them, stop and back up.**
-
-1. **Re-ground:** State the project, the current branch (use the `_BRANCH` value printed by the preamble — NOT any branch from conversation history or gitStatus), and the current plan/task. (1-2 sentences)
-2. **Simplify (ELI10, ALWAYS):** Explain what's happening in plain English a smart 16-year-old could follow. Concrete examples and analogies, not function names or internal jargon. Say what it DOES, not what it's called. State the stakes: what breaks if we pick wrong. This is NOT optional verbosity and it is NOT preamble — the user is about to make a decision and needs context. Even if you'd normally stay terse, emit the ELI10 paragraph. The user will ask for it anyway; do it the first time.
-3. **Recommend (ALWAYS):** Every question ends with `RECOMMENDATION: Choose [X] because [one-line reason]` on its own line. Never omit it. Never collapse it into the options list. Required for every AskUserQuestion, regardless of whether the options are coverage-differentiated or different-in-kind.
-4. **Score completeness (when meaningful):** When options differ in coverage (e.g. full test coverage vs happy path vs shortcut, complete error handling vs partial), score each with `Completeness: N/10` on its own line. Calibration: 10 = complete (all edge cases, full coverage), 7 = happy path only, 3 = shortcut. Flag any option ≤5 where a higher-completeness option exists. When options differ in kind (picking a review posture, picking an architectural approach, cherry-pick Add/Defer/Skip, choosing between two different kinds of systems), the completeness axis doesn't apply — skip `Completeness: N/10` entirely and write one line: `Note: options differ in kind, not coverage — no completeness score.` Do not fabricate filler scores.
-5. **Options:** Lettered options: `A) ... B) ... C) ...` — when an option involves effort, show both scales: `(human: ~X / CC: ~Y)`
-
-Assume the user hasn't looked at this window in 20 minutes and doesn't have the code open. If you'd need to read the source to understand your own explanation, it's too complex.
-
-Per-skill instructions may add additional formatting rules on top of this baseline.
 
 ## Writing Style (skip entirely if `EXPLAIN_LEVEL: terse` appears in the preamble echo OR the user's current message explicitly requests terse / no-explanations output)
 
@@ -1329,6 +1444,49 @@ Record the CI wait time for the deploy report.
 If CI passes within the timeout: Tell the user "CI passed after {duration}. Moving to readiness checks." Continue to Step 4.
 If CI fails: **STOP.** "CI failed. Here's what broke: {failures}. This needs to pass before I can merge."
 If timeout (15 min): **STOP.** "CI has been running for over 15 minutes — that's unusual. Check the GitHub Actions tab to see if something is stuck."
+
+---
+
+## Step 3.4: VERSION drift detection (workspace-aware ship)
+
+Before gathering readiness evidence, verify that the VERSION this PR claims is still the next free slot. A sibling workspace may have shipped and landed since `/ship` ran, leaving this PR's VERSION stale.
+
+```bash
+BRANCH_VERSION=$(git show HEAD:VERSION 2>/dev/null | tr -d '\r\n[:space:]' || echo "")
+BASE_BRANCH=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo main)
+BASE_VERSION=$(git show origin/$BASE_BRANCH:VERSION 2>/dev/null | tr -d '\r\n[:space:]' || echo "")
+
+# Imply bump level by comparing branch VERSION to base (crude but good enough for drift detection)
+# We don't need the exact original level — we just need "a level" that passes to the util.
+# If the minor digit advanced, call it minor; patch digit, patch; etc. If base > branch, skip (not ours to land).
+# For simplicity: use "patch" as a conservative default; util handles collision-past regardless of input level.
+QUEUE_JSON=$(bun run bin/gstack-next-version \
+  --base "$BASE_BRANCH" \
+  --bump patch \
+  --current-version "$BASE_VERSION" 2>/dev/null || echo '{"offline":true}')
+NEXT_SLOT=$(echo "$QUEUE_JSON" | jq -r '.version // empty')
+OFFLINE=$(echo "$QUEUE_JSON" | jq -r '.offline // false')
+```
+
+Behavior:
+
+1. If `OFFLINE=true` or the util fails: print `⚠ VERSION drift check unavailable (util offline) — proceeding with PR version v<BRANCH_VERSION>`. Continue to Step 3.5. CI's version-gate job is the backstop.
+
+2. If `BRANCH_VERSION` is already `>=` than `NEXT_SLOT`: no drift (or our PR is ahead of the queue). Continue.
+
+3. If drift is detected (a PR landed ahead of us and `BRANCH_VERSION < NEXT_SLOT`): **STOP** and print exactly:
+   ```
+   ⚠ VERSION drift detected.
+     This PR claims:  v<BRANCH_VERSION>
+     Next free slot:  v<NEXT_SLOT>   (queue moved since last /ship)
+
+   Rerun /ship from the feature branch to reconcile. /ship's ALREADY_BUMPED
+   branch will detect the drift and rewrite VERSION + CHANGELOG header + PR title
+   atomically. Do NOT merge from here — the landed PR would overwrite the other
+   branch's CHANGELOG entry or land with a duplicate version header.
+   ```
+
+   Exit non-zero. Do NOT auto-bump from `/land-and-deploy` — rerunning `/ship` is the clean path (it already handles VERSION + package.json + CHANGELOG header + PR title atomically via Step 12 ALREADY_BUMPED detection).
 
 ---
 

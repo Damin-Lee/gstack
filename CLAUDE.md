@@ -407,6 +407,16 @@ No auto-merging. No "I'll just clean this up."
 
 ## CHANGELOG + VERSION style
 
+**Versioning invariant (workspace-aware ship).** VERSION is a monotonic ordered
+release identifier, not a strict semver commitment. The bump level
+(major/minor/patch/micro) expresses intent at ship time. Queue-advancing past a
+claimed version within the same bump level is explicitly permitted — if branch A
+claims v1.7.0.0 as a MINOR and branch B is also a MINOR, B lands at v1.8.0.0
+(still a MINOR relative to main). Downstream consumers must NOT rely on
+"MINOR = feature-only, PATCH = fix-only" as a strict contract. This is why
+`bin/gstack-next-version` advances within the chosen bump level rather than
+repicking the level when collisions happen.
+
 **VERSION and CHANGELOG are branch-scoped.** Every feature branch that ships gets its
 own version bump and CHANGELOG entry. The entry describes what THIS branch adds —
 not what was already on main.

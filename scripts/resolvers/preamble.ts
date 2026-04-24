@@ -22,6 +22,7 @@ import { generateQuestionTuning } from './question-tuning';
 
 // Core bootstrap
 import { generatePreambleBash } from './preamble/generate-preamble-bash';
+import { generatePlanModeHandshake } from './preamble/generate-plan-mode-handshake';
 import { generateUpgradeCheck } from './preamble/generate-upgrade-check';
 import { generateCompletionStatus } from './preamble/generate-completion-status';
 
@@ -78,6 +79,13 @@ export function generatePreamble(ctx: TemplateContext): string {
   }
   const sections = [
     generatePreambleBash(ctx),
+    // Plan-mode handshake at position 1: after bash (so _SESSION_ID / _BRANCH /
+    // _TEL env vars are live for the synchronous telemetry write) and before
+    // all onboarding AskUserQuestion gates (so fresh-install users in plan mode
+    // see the handshake first, not drowned in telemetry / proactive / routing
+    // prompts). Host-scoped to Claude + interactive-frontmatter-scoped inside
+    // the resolver — no-op for every other skill/host combination.
+    generatePlanModeHandshake(ctx),
     generateUpgradeCheck(ctx),
     generateWritingStyleMigration(ctx),
     generateLakeIntro(),
@@ -87,12 +95,16 @@ export function generatePreamble(ctx: TemplateContext): string {
     generateVendoringDeprecation(ctx),
     generateSpawnedSessionCheck(),
     generateBrainHealthInstruction(ctx),
+    // AskUserQuestion Format renders BEFORE the model overlay so the pacing rule
+    // is the ambient default; the overlay's behavioral nudges land as subordinate
+    // patches. Opus 4.7 reads top-to-bottom and absorbs the first pacing directive
+    // it hits; reversing this order regresses plan-review cadence (v1.6.4.0 bug).
+    ...(tier >= 2 ? [generateAskUserFormat(ctx)] : []),
     generateBrainSyncBlock(ctx),
     generateModelOverlay(ctx),
     generateVoiceDirective(tier),
     ...(tier >= 2 ? [
       generateContextRecovery(ctx),
-      generateAskUserFormat(ctx),
       generateWritingStyle(ctx),
       generateCompletenessSection(),
       generateConfusionProtocol(),

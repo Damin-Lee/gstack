@@ -1,5 +1,57 @@
 # TODOS
 
+## Testing
+
+### `security-bench-haiku-responses.json` is 27MB, violates the 2MB tracked-file gate
+
+**What:** `browse/test/fixtures/security-bench-haiku-responses.json` landed on main at v1.6.4.0 (PR #1135) at 27MB. The `no compiled binaries in git > git tracks no files larger than 2MB` gate in `test/skill-validation.test.ts:1623` fails on main and on every feature branch that merges main afterward.
+
+**Why:** The fixture is a legitimate CI replay corpus (real Haiku responses from the 500-case BrowseSafe-Bench) used to verify the ensemble classifier deterministically. But 13x over the 2MB limit means it will keep failing the validation test for every future ship.
+
+**Pros:** Removes a pre-existing failure that wastes a triage slot in every /ship run.
+
+**Cons:** Moving to git-lfs adds a dependency. Splitting into chunks risks breaking the bench test. External hosting adds a CI fetch step.
+
+**Context:** Noticed during workspace-aware-ship /ship on 2026-04-23 when the post-merge test suite flagged this single failure. Introduced on main in PR #1135 (`v1.6.4.0: cut Haiku classifier FP from 44% to 23%`), commit d75402bb. Two reasonable paths: (a) split into multiple ≤2MB chunks and load them in the bench test, (b) move to git-lfs.
+
+**Effort:** M (human: ~2-3h / CC: ~20 min)
+**Priority:** P1 (not blocking ship, but every future /ship triages the same failure)
+**Depends on:** nothing
+
+---
+
+## P1: Structural STOP-Ask forcing function across all skills (v1.11.1.0 follow-up)
+
+**What:** Design and implement a structural forcing function that catches when a skill mandates per-issue AskUserQuestion but the model silently substitutes batch-synthesis. Candidate mechanisms: question-count assertion (skill declares expected question count in frontmatter; post-run audit logs if model fired <N), typed question templates (skill hands the model pre-built AskUserQuestion payloads rather than prose instructions), or a canUseTool-based post-run audit that compares declared-gates-fired vs expected.
+
+**Why:** v1.11.1.0 shipped a plan-mode handshake that forces AskUserQuestion when plan mode is active. It fixes the reported instance of the bug (plan-mode entry) but NOT the broader class. The injected commentary from a separate Claude session documented the same failure mode in auto mode — model silently substitutes batch-synthesis for STOP-Ask loops whenever the skill's interactive contract collides with any other rule surface (auto mode, plan mode, tool-count anxiety, cognitive load). Without structural enforcement, every skill with STOP-per-issue contracts remains vulnerable.
+
+**Pros:** Catches a class-of-bug, not an instance. Applies to every skill that declares STOP gates. Builds on `canUseTool` primitive shipped in v1.11.1.0's agent-sdk-runner extension.
+
+**Cons:** Real design work. How does a skill declare expected question count — static value in frontmatter, or dynamic based on number of review sections that surface findings? Is the audit inline (blocking, same-turn) or post-hoc (after skill completion)? Calibration of expected-vs-actual thresholds depends on real V0 question-log data across skills.
+
+**Context:** Relevant files — `scripts/question-registry.ts` (typed question catalog), `scripts/resolvers/question-tuning.ts` (preference classification), `bin/gstack-question-log` (event log), `bin/gstack-question-preference` (read/write preferences), `test/helpers/agent-sdk-runner.ts` (canUseTool harness added in v1.11.1.0). Existing question-log already captures fire events; the gap is declaring expected counts and auditing against them.
+
+**Effort:** L (human: ~1-2 weeks / CC+gstack: ~2-3 hours for design doc + first-pass implementation).
+**Priority:** P1 if interactive-skill volume is growing; P2 otherwise.
+**Depends on / blocked by:** v1.11.1.0 handshake landing (provides concrete forcing-function pattern to generalize from). Also needs a design doc — likely its own `docs/designs/STOP_ASK_ENFORCEMENT_V0.md`.
+
+## P2: Apply preamble handshake to non-review interactive skills
+
+**What:** Survey gstack skills beyond the 4 review skills to identify ones with interactive STOP-Ask contracts. For each, audit whether `interactive: true` in the frontmatter is appropriate (fires the preamble handshake in plan mode). Candidate skills to audit: `/office-hours`, `/codex` (consult mode), `/investigate`, `/qa`, `/retro`, `/cso`, `/brainstorm`. Non-candidates: workflow-executors like `/ship`, `/land-and-deploy`, `/context-save` that benefit from plan-mode batch execution.
+
+**Why:** v1.11.1.0 opted 4 review skills into the plan-mode handshake (plan-ceo-review, plan-eng-review, plan-design-review, plan-devex-review). Codex's outside-voice review (Finding 6) noted nested composition — `/plan-ceo-review` can invoke `/office-hours` inline, so `/office-hours` in plan mode standalone would still silently skip its forcing questions. Extending handshake coverage closes that gap for the next tier of interactive skills.
+
+**Pros:** Consistent plan-mode behavior across interactive skills. Low per-skill cost under the preamble-pivot architecture — one frontmatter line (`interactive: true`) + SKILL.md regeneration.
+
+**Cons:** Requires per-skill classification review. Some skills that look interactive (e.g., `/qa`) actually run long non-interactive tool loops punctuated by occasional AskUserQuestion — the handshake gate might over-fire. Audit needs a judgment call per skill.
+
+**Context:** Files to consult per-skill — the SKILL.md.tmpl frontmatter, the skill's STOP-point count, and any existing touchfiles.ts entries for E2E coverage. The handshake resolver is at `scripts/resolvers/preamble/generate-plan-mode-handshake.ts`. Pattern to follow: set `interactive: true` in the skill's frontmatter, add a gate-tier E2E test to touchfiles.ts using the extended `test/helpers/agent-sdk-runner.ts`.
+
+**Effort:** M (human: ~3-5 days / CC+gstack: ~1-2 hours — the thinking cost is per-skill classification, not code).
+**Priority:** P2 — plan-mode handshake on the 4 review skills catches the reported bug; this TODO catches the cousins.
+**Depends on / blocked by:** v1.11.1.0 landing (provides the preamble-pivot architecture the cousins inherit).
+
 ## Context skills
 
 ### `/context-save --lane` + `/context-restore --lane` for parallel workstreams
@@ -17,22 +69,6 @@
 **Effort:** M (human: ~1-2 days / CC: ~45-60 min)
 **Priority:** P3 (nice-to-have, not blocking anyone yet)
 **Depends on:** `/context-save` + `/context-restore` rename stable in production (v1.0.1.0+). Research: does Conductor expose a spawn-workspace CLI?
-
-## P0: Verify Opus 4.7 fanout nudge inside Claude Code harness (next rev)
-
-**What:** Re-run the fanout A/B from `test/skill-e2e-opus-47.test.ts` against Opus 4.7 **inside Claude Code's interactive harness**, not via `claude -p`. The current eval calls `claude -p` as a subprocess, which does not load SKILL.md content as system context and uses different tool wiring than the live Claude Code session. Build a small harness (Claude Code extension hook, direct API call with the same system prompt Claude Code uses, or a scripted MCP invocation) that reproduces the real tool_use context, then run the same 3-file-read A/B with and without the `model-overlays/opus-4-7.md` overlay. Record parallel-tool-call count in the first assistant turn for each arm.
-
-**Why:** v1.6.1.0 shipped a rewritten "Fan out explicitly" nudge with a concrete tool_use example (`[Read(a), Read(b), Read(c)]`). Under `claude -p` on `claude-opus-4-7`, both overlay-ON and overlay-OFF arms emitted zero parallel tool calls in the first turn. The routing A/B worked fine in the same harness (3/3 positives routed correctly), so the gap is specific to fanout, and likely specific to how `claude -p` constructs system prompts and tool schemas. Without measurement inside the real harness, we do not know whether the nudge ever lands for a real user. The PR went to production with the fanout claim asserted but unverified; this TODO closes that loop.
-
-**Pros:** Produces the "actually shipped fanout" measurement the ship-quality review flagged as missing. If the nudge works in Claude Code harness, we can gate it with a `periodic` eval and stop worrying. If it does not, we know to rewrite or drop the nudge rather than carry dead prompt weight. Either answer is better than the current "unverified."
-
-**Cons:** Requires instrumenting Claude Code's harness (or a faithful replica) rather than the easier `claude -p` path. A faithful replica needs the same system prompt, the same tool definitions, and the same stop-sequence handling. Estimated one afternoon to wire, plus $3-5 per eval run.
-
-**Context:** See `~/.gstack/projects/garrytan-gstack/evals/1.6.0.0-feat-opus-4.7-migration-e2e-opus-47-*.json` for the raw transcripts showing 0 parallel calls in first turn across both arms. The overlay is at `model-overlays/opus-4-7.md` with an explicit wrong/right tool_use example. The eval file at `test/skill-e2e-opus-47.test.ts` has the full setup including per-skill SKILL.md install, CLAUDE.md routing block, and overlay inlining.
-
-**Effort:** M (human: ~1 day / CC: ~45 min for the harness wiring, plus the eval run cost)
-**Priority:** P0 (ship-quality commitment from v1.6.1.0 — do not let it drift)
-**Depends on / blocked by:** Access to Claude Code's system prompt + tool schema (or a reproducible way to mirror them). May require a small MCP server or a direct Messages API call that mirrors Claude Code's session setup.
 
 ## P0: PACING_UPDATES_V0 — Louise's fatigue root cause (V1.1)
 
@@ -1267,6 +1303,15 @@ Shipped in v0.6.5. TemplateContext in gen-skill-docs.ts bakes skill name into pr
 **Depends on:** CDP patches proving the value of anti-bot stealth first
 
 ## Completed
+
+### Overlay efficacy harness + Opus 4.7 fanout nudge removal (v1.10.1.0)
+- Built `test/skill-e2e-overlay-harness.test.ts`, a parametric periodic-tier eval that drives `@anthropic-ai/claude-agent-sdk` and measures first-turn fanout rate (overlay-ON vs overlay-OFF) across registered fixtures
+- Measured the original "Fan out explicitly" overlay nudge: baseline Opus 4.7 = 70% first-turn fanout on toy prompt, with our nudge = 10%, with Anthropic's own canonical `<use_parallel_tool_calls>` text = 0%
+- Removed the counterproductive nudge from `model-overlays/opus-4-7.md`
+- Shipped 36-test free-tier unit suite for the SDK runner + strict fixture validator
+- Registered `overlay-harness-opus-4-7-fanout-{toy,realistic}` in E2E_TOUCHFILES and E2E_TIERS
+- Total investigation cost: ~$7 across 3 eval runs
+**Completed:** v1.10.1.0
 
 ### CI eval pipeline (v0.9.9.0)
 - GitHub Actions eval upload on Ubicloud runners ($0.006/run)
