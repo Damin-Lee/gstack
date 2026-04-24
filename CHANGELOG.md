@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.11.1.0] - 2026-04-23
+
+## **Plan mode stopped silently rubber-stamping your reviews. The forcing questions actually fire now.**
+
+If you ran `/plan-ceo-review` or any interactive review skill while in plan mode, the skill used to read your diff, skip every STOP gate, write a plan file, and exit. Zero AskUserQuestion calls. Zero mode selection. Zero per-section decisions. The skill's interactive contract got outranked by plan mode's system-reminder, which tells the model to run its own workflow and ignore everything else. This release adds a preamble-level STOP gate that fires before any analysis, so you always get the interactive review the skill was designed to run.
+
+### What shipped
+
+Four interactive review skills (plan-ceo-review, plan-eng-review, plan-design-review, plan-devex-review) now emit a two-option AskUserQuestion the moment plan mode is detected: exit-and-rerun interactively, or cancel. No silent bypass. The gate is classified one-way-door in the question registry so `/plan-tune` preferences can't auto-decide past it. Outcome gets logged to `~/.gstack/analytics/skill-usage.jsonl` synchronously when the handshake fires, so A-exit and C-cancel are captured even though they terminate the skill before the end-of-run telemetry block.
+
+The test harness got a canUseTool extension built on Anthropic's Agent SDK (already installed at v0.2.117). When a test supplies a canUseTool callback, `test/helpers/agent-sdk-runner.ts` flips `permissionMode` from `bypassPermissions` to `default` so the callback actually fires. This is the foundation for asserting AskUserQuestion content end-to-end, which gstack's E2E tests previously couldn't do at all. They had to instruct the model to skip AskUserQuestion entirely. Every future interactive-skill test builds on this.
+
+### The numbers that matter
+
+Source: new unit tests in `test/gen-skill-docs.test.ts` (8 tests covering handshake presence, absence, composition ordering, 0C-bis STOP block) and `test/agent-sdk-runner.test.ts` (6 tests covering canUseTool + permission-mode + passThrough helper). All 14 pass locally in <250ms, free tier.
+
+| Surface | Before | After |
+|---|---|---|
+| Claude skills rendering the handshake | 0 | 4 (plan-ceo, plan-eng, plan-design, plan-devex) |
+| Non-Claude host outputs with handshake text | N/A | 0 (host-scoped via `ctx.host === 'claude'` check) |
+| E2E tests that can assert AskUserQuestion content | 0 | 1 harness primitive, ready for every interactive skill |
+| Plan-mode entry to any of 4 review skills | Silent bypass | Two-option STOP gate |
+| Step 0C-bis in plan-ceo-review | No STOP block, could drift to 0F | Explicit `**STOP.**` block matching 0F pattern |
+| Post-handshake telemetry outcomes captured | Neither A-exit nor C-cancel | Both (synchronous write before ExitPlanMode) |
+
+### What this means for builders
+
+If you're running gstack in plan mode on a PR review, you'll see one question before the skill does anything: "Exit plan mode and run interactively, or cancel?" Pick A, press esc-esc, rerun the skill in normal mode, get the full interactive review you expected. Pick C to bail cleanly. No more silent rubber-stamp.
+
+If you're building new interactive skills (yours or contributing to gstack), you can now write real E2E tests that assert on AskUserQuestion shape and routing via the canUseTool harness. See `test/agent-sdk-runner.test.ts` for the pattern and `test/helpers/agent-sdk-runner.ts` for the API.
+
+### Itemized changes
+
+#### Fixed
+
+- Plan mode no longer silently skips AskUserQuestion gates in `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, or `/plan-devex-review`. A preamble-level handshake fires as the first thing the skill does when the plan-mode system-reminder is present, forcing a user choice before any analysis or plan-file writes.
+- `/plan-ceo-review` Step 0C-bis now has an explicit STOP block matching the pattern used at Step 0F, so the approach-selection question can't be silently skipped when the skill continues to mode selection.
+
+#### Added
+
+- New resolver `scripts/resolvers/preamble/generate-plan-mode-handshake.ts` emits the handshake prose and telemetry bash. Host-scoped to Claude only via `ctx.host === 'claude'` check. Opt-in per skill via `interactive: true` in frontmatter.
+- New frontmatter field `interactive: boolean` on skill templates. Generator-only input parsed by `scripts/gen-skill-docs.ts`, never written to generated SKILL.md output (follows the `preamble-tier` precedent).
+- New question registry entries `plan-{ceo,eng,design,devex}-review-plan-mode-handshake` with `door_type: 'one-way'` in `scripts/question-registry.ts`. Question-tuning `never-ask` preferences cannot suppress this gate.
+- New telemetry field `plan_mode_handshake` in `~/.gstack/analytics/skill-usage.jsonl` with outcomes `fired`, `A-exit`, `C-cancel` written synchronously as the handshake fires. Captures outcomes that would otherwise terminate the skill before end-of-run telemetry runs.
+- `test/helpers/agent-sdk-runner.ts` extended with optional `canUseTool` callback parameter. When supplied, flips `permissionMode` to `default`, auto-adds `AskUserQuestion` to `allowedTools`, and passes the callback to the SDK. Exports `passThroughNonAskUserQuestion` helper for tests that only want to assert on AskUserQuestion but auto-allow other tools.
+
+#### For contributors
+
+- Added 5 unit tests in `test/gen-skill-docs.test.ts` verifying handshake presence in 4 interactive skills, absence in non-interactive skills, absence in non-Claude host outputs, composition ordering (handshake precedes upgrade-check), and 0C-bis STOP block wiring.
+- Added 6 unit tests in `test/agent-sdk-runner.test.ts` verifying permission-mode flip, allowedTools auto-injection, canUseTool callback propagation, and pass-through helper behavior.
+- Added 6 gate-tier entries to `test/helpers/touchfiles.ts` covering the new E2E test surface. Dependency glob fires any of the new tests when: the relevant skill template, the handshake resolver, preamble composition, the question registry, the one-way-door classifier, or the agent-sdk-runner changes.
+- Filed 2 P1/P2 follow-ups in `TODOS.md`: structural STOP-Ask forcing function across all skills (broader class of bug beyond plan-mode entry), and extending `interactive: true` audit to non-review interactive skills like `/office-hours`, `/codex`, `/investigate`, `/qa`.
+
 ## [1.11.0.0] - 2026-04-23
 
 ## **Workspace-aware ship. Two open PRs can't both claim the same VERSION anymore.**
@@ -50,6 +103,57 @@ If you're routinely running 3-10 Conductor windows against the same repo, this i
 
 - `test/gstack-next-version.test.ts`. 21 pure-function tests (parseVersion / bumpVersion / cmpVersion / pickNextSlot with 8 collision scenarios / markActiveSiblings 4 cases) plus a CLI smoke test against the live repo.
 - Golden ship fixtures refreshed for all three hosts (claude, codex, factory) after Step 12 and Step 19 template changes. This is exactly the blast radius Codex flagged during the CEO review (cross-model tension #8), handled in the same PR rather than as a follow-up.
+
+## **Plan mode stopped silently rubber-stamping your reviews. The forcing questions actually fire now.**
+
+If you ran `/plan-ceo-review` or any interactive review skill while in plan mode, the skill used to read your diff, skip every STOP gate, write a plan file, and exit. Zero AskUserQuestion calls. Zero mode selection. Zero per-section decisions. The skill's interactive contract got outranked by plan mode's system-reminder, which tells the model to run its own workflow and ignore everything else. This release adds a preamble-level STOP gate that fires before any analysis, so you always get the interactive review the skill was designed to run.
+
+### What shipped
+
+Four interactive review skills (plan-ceo-review, plan-eng-review, plan-design-review, plan-devex-review) now emit a two-option AskUserQuestion the moment plan mode is detected: exit-and-rerun interactively, or cancel. No silent bypass. The gate is classified one-way-door in the question registry so `/plan-tune` preferences can't auto-decide past it. Outcome gets logged to `~/.gstack/analytics/skill-usage.jsonl` synchronously when the handshake fires, so A-exit and C-cancel are captured even though they terminate the skill before the end-of-run telemetry block.
+
+The test harness got a canUseTool extension built on Anthropic's Agent SDK (already installed at v0.2.117). When a test supplies a canUseTool callback, `test/helpers/agent-sdk-runner.ts` flips `permissionMode` from `bypassPermissions` to `default` so the callback actually fires. This is the foundation for asserting AskUserQuestion content end-to-end, which gstack's E2E tests previously couldn't do at all. They had to instruct the model to skip AskUserQuestion entirely. Every future interactive-skill test builds on this.
+
+### The numbers that matter
+
+Source: new unit tests in `test/gen-skill-docs.test.ts` (8 tests covering handshake presence, absence, composition ordering, 0C-bis STOP block) and `test/agent-sdk-runner.test.ts` (6 tests covering canUseTool + permission-mode + passThrough helper). All 14 pass locally in <250ms, free tier.
+
+| Surface | Before | After |
+|---|---|---|
+| Claude skills rendering the handshake | 0 | 4 (plan-ceo, plan-eng, plan-design, plan-devex) |
+| Non-Claude host outputs with handshake text | N/A | 0 (host-scoped via `ctx.host === 'claude'` check) |
+| E2E tests that can assert AskUserQuestion content | 0 | 1 harness primitive, ready for every interactive skill |
+| Plan-mode entry to any of 4 review skills | Silent bypass | Two-option STOP gate |
+| Step 0C-bis in plan-ceo-review | No STOP block, could drift to 0F | Explicit `**STOP.**` block matching 0F pattern |
+| Post-handshake telemetry outcomes captured | Neither A-exit nor C-cancel | Both (synchronous write before ExitPlanMode) |
+
+### What this means for builders
+
+If you're running gstack in plan mode on a PR review, you'll see one question before the skill does anything: "Exit plan mode and run interactively, or cancel?" Pick A, press esc-esc, rerun the skill in normal mode, get the full interactive review you expected. Pick C to bail cleanly. No more silent rubber-stamp.
+
+If you're building new interactive skills (yours or contributing to gstack), you can now write real E2E tests that assert on AskUserQuestion shape and routing via the canUseTool harness. See `test/agent-sdk-runner.test.ts` for the pattern and `test/helpers/agent-sdk-runner.ts` for the API.
+
+### Itemized changes
+
+#### Fixed
+
+- Plan mode no longer silently skips AskUserQuestion gates in `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, or `/plan-devex-review`. A preamble-level handshake fires as the first thing the skill does when the plan-mode system-reminder is present, forcing a user choice before any analysis or plan-file writes.
+- `/plan-ceo-review` Step 0C-bis now has an explicit STOP block matching the pattern used at Step 0F, so the approach-selection question can't be silently skipped when the skill continues to mode selection.
+
+#### Added
+
+- New resolver `scripts/resolvers/preamble/generate-plan-mode-handshake.ts` emits the handshake prose and telemetry bash. Host-scoped to Claude only via `ctx.host === 'claude'` check. Opt-in per skill via `interactive: true` in frontmatter.
+- New frontmatter field `interactive: boolean` on skill templates. Generator-only input parsed by `scripts/gen-skill-docs.ts`, never written to generated SKILL.md output (follows the `preamble-tier` precedent).
+- New question registry entry `plan-mode-handshake` with `door_type: 'one-way'` in `scripts/question-registry.ts`. Question-tuning `never-ask` preferences cannot suppress this gate.
+- New telemetry field `plan_mode_handshake` in `~/.gstack/analytics/skill-usage.jsonl` with outcomes `fired`, `A-exit`, `C-cancel` written synchronously as the handshake fires. Captures outcomes that would otherwise terminate the skill before end-of-run telemetry runs.
+- `test/helpers/agent-sdk-runner.ts` extended with optional `canUseTool` callback parameter. When supplied, flips `permissionMode` to `default`, auto-adds `AskUserQuestion` to `allowedTools`, and passes the callback to the SDK. Exports `passThroughNonAskUserQuestion` helper for tests that only want to assert on AskUserQuestion but auto-allow other tools.
+
+#### For contributors
+
+- Added 8 unit tests in `test/gen-skill-docs.test.ts` verifying handshake presence in 4 interactive skills, absence in non-interactive skills, absence in non-Claude host outputs, composition ordering (handshake precedes upgrade-check), and 0C-bis STOP block wiring.
+- Added 6 unit tests in `test/agent-sdk-runner.test.ts` verifying permission-mode flip, allowedTools auto-injection, canUseTool callback propagation, and pass-through helper behavior.
+- Added 6 gate-tier entries to `test/helpers/touchfiles.ts` covering the new E2E test surface. Dependency glob fires any of the new tests when: the relevant skill template, the handshake resolver, preamble composition, the question registry, the one-way-door classifier, or the agent-sdk-runner changes.
+- Filed 2 P1/P2 follow-ups in `TODOS.md`: structural STOP-Ask forcing function across all skills (broader class of bug beyond plan-mode entry), and extending `interactive: true` audit to non-review interactive skills like `/office-hours`, `/codex`, `/investigate`, `/qa`.
 
 ## [1.10.1.0] - 2026-04-23
 

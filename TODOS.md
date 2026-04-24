@@ -20,6 +20,38 @@
 
 ---
 
+## P1: Structural STOP-Ask forcing function across all skills (v1.11.1.0 follow-up)
+
+**What:** Design and implement a structural forcing function that catches when a skill mandates per-issue AskUserQuestion but the model silently substitutes batch-synthesis. Candidate mechanisms: question-count assertion (skill declares expected question count in frontmatter; post-run audit logs if model fired <N), typed question templates (skill hands the model pre-built AskUserQuestion payloads rather than prose instructions), or a canUseTool-based post-run audit that compares declared-gates-fired vs expected.
+
+**Why:** v1.11.1.0 shipped a plan-mode handshake that forces AskUserQuestion when plan mode is active. It fixes the reported instance of the bug (plan-mode entry) but NOT the broader class. The injected commentary from a separate Claude session documented the same failure mode in auto mode — model silently substitutes batch-synthesis for STOP-Ask loops whenever the skill's interactive contract collides with any other rule surface (auto mode, plan mode, tool-count anxiety, cognitive load). Without structural enforcement, every skill with STOP-per-issue contracts remains vulnerable.
+
+**Pros:** Catches a class-of-bug, not an instance. Applies to every skill that declares STOP gates. Builds on `canUseTool` primitive shipped in v1.11.1.0's agent-sdk-runner extension.
+
+**Cons:** Real design work. How does a skill declare expected question count — static value in frontmatter, or dynamic based on number of review sections that surface findings? Is the audit inline (blocking, same-turn) or post-hoc (after skill completion)? Calibration of expected-vs-actual thresholds depends on real V0 question-log data across skills.
+
+**Context:** Relevant files — `scripts/question-registry.ts` (typed question catalog), `scripts/resolvers/question-tuning.ts` (preference classification), `bin/gstack-question-log` (event log), `bin/gstack-question-preference` (read/write preferences), `test/helpers/agent-sdk-runner.ts` (canUseTool harness added in v1.11.1.0). Existing question-log already captures fire events; the gap is declaring expected counts and auditing against them.
+
+**Effort:** L (human: ~1-2 weeks / CC+gstack: ~2-3 hours for design doc + first-pass implementation).
+**Priority:** P1 if interactive-skill volume is growing; P2 otherwise.
+**Depends on / blocked by:** v1.11.1.0 handshake landing (provides concrete forcing-function pattern to generalize from). Also needs a design doc — likely its own `docs/designs/STOP_ASK_ENFORCEMENT_V0.md`.
+
+## P2: Apply preamble handshake to non-review interactive skills
+
+**What:** Survey gstack skills beyond the 4 review skills to identify ones with interactive STOP-Ask contracts. For each, audit whether `interactive: true` in the frontmatter is appropriate (fires the preamble handshake in plan mode). Candidate skills to audit: `/office-hours`, `/codex` (consult mode), `/investigate`, `/qa`, `/retro`, `/cso`, `/brainstorm`. Non-candidates: workflow-executors like `/ship`, `/land-and-deploy`, `/context-save` that benefit from plan-mode batch execution.
+
+**Why:** v1.11.1.0 opted 4 review skills into the plan-mode handshake (plan-ceo-review, plan-eng-review, plan-design-review, plan-devex-review). Codex's outside-voice review (Finding 6) noted nested composition — `/plan-ceo-review` can invoke `/office-hours` inline, so `/office-hours` in plan mode standalone would still silently skip its forcing questions. Extending handshake coverage closes that gap for the next tier of interactive skills.
+
+**Pros:** Consistent plan-mode behavior across interactive skills. Low per-skill cost under the preamble-pivot architecture — one frontmatter line (`interactive: true`) + SKILL.md regeneration.
+
+**Cons:** Requires per-skill classification review. Some skills that look interactive (e.g., `/qa`) actually run long non-interactive tool loops punctuated by occasional AskUserQuestion — the handshake gate might over-fire. Audit needs a judgment call per skill.
+
+**Context:** Files to consult per-skill — the SKILL.md.tmpl frontmatter, the skill's STOP-point count, and any existing touchfiles.ts entries for E2E coverage. The handshake resolver is at `scripts/resolvers/preamble/generate-plan-mode-handshake.ts`. Pattern to follow: set `interactive: true` in the skill's frontmatter, add a gate-tier E2E test to touchfiles.ts using the extended `test/helpers/agent-sdk-runner.ts`.
+
+**Effort:** M (human: ~3-5 days / CC+gstack: ~1-2 hours — the thinking cost is per-skill classification, not code).
+**Priority:** P2 — plan-mode handshake on the 4 review skills catches the reported bug; this TODO catches the cousins.
+**Depends on / blocked by:** v1.11.1.0 landing (provides the preamble-pivot architecture the cousins inherit).
+
 ## Context skills
 
 ### `/context-save --lane` + `/context-restore --lane` for parallel workstreams
