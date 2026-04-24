@@ -82,6 +82,17 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
   'plan-eng-review-artifact':  ['plan-eng-review/**'],
   'plan-review-report':        ['plan-eng-review/**', 'scripts/gen-skill-docs.ts'],
 
+  // Plan-mode handshake (v1.10.2.0) — gate-tier safety regression tests.
+  // Each fires when any of: the interactive skill's template, the resolver,
+  // preamble composition, the Agent SDK harness, the question registry, or
+  // the one-way-door classifier changes.
+  'plan-ceo-review-plan-mode':    ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
+  'plan-eng-review-plan-mode':    ['plan-eng-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
+  'plan-design-review-plan-mode-handshake': ['plan-design-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
+  'plan-devex-review-plan-mode':  ['plan-devex-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
+  'plan-mode-no-op':              ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts'],
+  'e2e-harness-audit':            ['plan-ceo-review/**', 'plan-eng-review/**', 'plan-design-review/**', 'plan-devex-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'test/helpers/agent-sdk-runner.ts'],
+
   // AskUserQuestion format regression (RECOMMENDATION + Completeness: N/10)
   // Fires when either template OR the two preamble resolvers change.
   'plan-ceo-review-format-mode':      ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-ask-user-format.ts', 'scripts/resolvers/preamble/generate-completeness-section.ts', 'scripts/resolvers/preamble.ts', 'model-overlays/opus-4-7.md'],
@@ -316,6 +327,14 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic'> = {
   'plan-eng-review-artifact': 'periodic',
   'plan-eng-coverage-audit': 'gate',
   'plan-review-report': 'gate',
+
+  // Plan-mode handshake — deterministic safety regression, gate-tier
+  'plan-ceo-review-plan-mode': 'gate',
+  'plan-eng-review-plan-mode': 'gate',
+  'plan-design-review-plan-mode-handshake': 'gate',
+  'plan-devex-review-plan-mode': 'gate',
+  'plan-mode-no-op': 'gate',
+  'e2e-harness-audit': 'gate',
 
   // AskUserQuestion format regression — periodic (Opus 4.7 non-deterministic benchmark)
   'plan-ceo-review-format-mode': 'periodic',

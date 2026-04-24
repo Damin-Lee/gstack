@@ -2774,3 +2774,93 @@ describe('voice-triggers processing', () => {
     expect(frontmatter).not.toContain('voice-triggers:');
   });
 });
+
+describe('plan-mode handshake (interactive: true) resolver', () => {
+  const INTERACTIVE_SKILLS = [
+    'plan-ceo-review',
+    'plan-eng-review',
+    'plan-design-review',
+    'plan-devex-review',
+  ];
+
+  const HANDSHAKE_MARKER = '## Plan Mode Handshake';
+
+  test.each(INTERACTIVE_SKILLS)(
+    '%s (Claude host) SKILL.md contains the handshake section',
+    (skill) => {
+      const content = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
+      expect(content).toContain(HANDSHAKE_MARKER);
+      expect(content).toContain(
+        'Plan mode is active. The user indicated that they do not want you to execute yet',
+      );
+    },
+  );
+
+  test('handshake is absent from non-interactive Claude skills', () => {
+    const nonInteractive = ['ship', 'review', 'qa', 'office-hours', 'codex', 'retro', 'cso'];
+    for (const skill of nonInteractive) {
+      const content = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
+      expect(content).not.toContain(HANDSHAKE_MARKER);
+    }
+  });
+
+  test('handshake is absent from non-Claude host outputs when present on disk', () => {
+    // Non-Claude hosts render to hostSubdirs (.agents/, .openclaw/, etc). The
+    // handshake resolver returns '' when ctx.host !== 'claude', so those
+    // outputs must not contain the marker. The current gen-skill-docs layout
+    // prefixes skill names as `gstack-<skill>` under the hostSubdir; older
+    // layouts used `gstack/<skill>` (no prefix). Only stable-present paths
+    // are asserted — older ones may or may not exist per install history.
+    const candidateOutputs = [
+      // Current prefixed layout
+      path.join(ROOT, '.agents', 'skills', 'gstack-plan-ceo-review', 'SKILL.md'),
+      path.join(ROOT, '.openclaw', 'skills', 'gstack-plan-ceo-review', 'SKILL.md'),
+      path.join(ROOT, '.opencode', 'skills', 'gstack-plan-ceo-review', 'SKILL.md'),
+      path.join(ROOT, '.factory', 'skills', 'gstack-plan-ceo-review', 'SKILL.md'),
+      path.join(ROOT, '.hermes', 'skills', 'gstack-plan-ceo-review', 'SKILL.md'),
+    ];
+    let checked = 0;
+    for (const out of candidateOutputs) {
+      if (fs.existsSync(out)) {
+        const content = fs.readFileSync(out, 'utf-8');
+        expect(content).not.toContain(HANDSHAKE_MARKER);
+        checked++;
+      }
+    }
+    // At least one non-Claude host's output should exist after a full gen
+    // run; this test is meaningful only if we checked something. If no
+    // non-Claude outputs exist locally, the cross-host guarantee is still
+    // enforced by the resolver's ctx.host check; this test is belt-and-
+    // suspenders and becomes a no-op rather than a false positive.
+    if (checked === 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        'plan-mode handshake: no non-Claude host outputs found for cross-host absence check — ' +
+          'run `bun run gen:skill-docs --host all` to populate',
+      );
+    }
+  });
+
+  test('0C-bis STOP block present in plan-ceo-review/SKILL.md', () => {
+    const content = fs.readFileSync(path.join(ROOT, 'plan-ceo-review', 'SKILL.md'), 'utf-8');
+    const presentIdx = content.indexOf('Present these approach options via AskUserQuestion');
+    const preludeIdx = content.indexOf('### 0D-prelude');
+    expect(presentIdx).toBeGreaterThan(0);
+    expect(preludeIdx).toBeGreaterThan(presentIdx);
+    const between = content.slice(presentIdx, preludeIdx);
+    expect(between).toContain('**STOP.**');
+    expect(between).toContain('Do NOT proceed to Step 0D or 0F until the user responds to 0C-bis');
+  });
+
+  test('handshake resolver is wired BEFORE generateUpgradeCheck in preamble', () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, 'plan-ceo-review', 'SKILL.md'),
+      'utf-8',
+    );
+    const handshakeIdx = content.indexOf(HANDSHAKE_MARKER);
+    const upgradeIdx = content.indexOf('UPGRADE_AVAILABLE');
+    expect(handshakeIdx).toBeGreaterThan(0);
+    expect(upgradeIdx).toBeGreaterThan(0);
+    expect(handshakeIdx).toBeLessThan(upgradeIdx);
+  });
+});
