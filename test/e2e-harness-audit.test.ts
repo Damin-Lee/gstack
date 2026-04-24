@@ -78,12 +78,12 @@ function findInteractiveSkills(): string[] {
 /**
  * Scan a test file's contents for the canUseTool-via-harness pattern.
  * Either: direct canUseTool usage in runAgentSdkTest, or usage of the
- * shared plan-mode-handshake-helpers that wrap it.
+ * shared plan-mode-helpers that wrap it.
  */
 function hasCanUseToolCoverage(testFile: string): boolean {
   const content = fs.readFileSync(testFile, 'utf-8');
   if (content.includes('canUseTool')) return true;
-  if (content.includes('runPlanModeHandshakeTest')) return true;
+  if (content.includes('runPlanModeSkillTest')) return true;
   return false;
 }
 

@@ -262,45 +262,6 @@ export const QUESTIONS = {
   },
 
   // -----------------------------------------------------------------------
-  // Plan-mode handshake — fires at the top of any interactive review skill
-  // when the user is in plan mode. Safety-critical, always asked regardless
-  // of user's tuning preferences. See scripts/resolvers/preamble/generate-
-  // plan-mode-handshake.ts.
-  // -----------------------------------------------------------------------
-  'plan-ceo-review-plan-mode-handshake': {
-    id: 'plan-ceo-review-plan-mode-handshake',
-    skill: 'plan-ceo-review',
-    category: 'routing',
-    door_type: 'one-way',
-    options: ['exit-and-rerun', 'cancel'],
-    description: "Plan mode detected — exit and rerun interactively, or cancel?",
-  },
-  'plan-eng-review-plan-mode-handshake': {
-    id: 'plan-eng-review-plan-mode-handshake',
-    skill: 'plan-eng-review',
-    category: 'routing',
-    door_type: 'one-way',
-    options: ['exit-and-rerun', 'cancel'],
-    description: "Plan mode detected — exit and rerun interactively, or cancel?",
-  },
-  'plan-design-review-plan-mode-handshake': {
-    id: 'plan-design-review-plan-mode-handshake',
-    skill: 'plan-design-review',
-    category: 'routing',
-    door_type: 'one-way',
-    options: ['exit-and-rerun', 'cancel'],
-    description: "Plan mode detected — exit and rerun interactively, or cancel?",
-  },
-  'plan-devex-review-plan-mode-handshake': {
-    id: 'plan-devex-review-plan-mode-handshake',
-    skill: 'plan-devex-review',
-    category: 'routing',
-    door_type: 'one-way',
-    options: ['exit-and-rerun', 'cancel'],
-    description: "Plan mode detected — exit and rerun interactively, or cancel?",
-  },
-
-  // -----------------------------------------------------------------------
   // /plan-ceo-review — scope & strategy
   // -----------------------------------------------------------------------
   'plan-ceo-review-mode': {

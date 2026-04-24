@@ -118,99 +118,20 @@ echo "CHECKPOINT_PUSH: $_CHECKPOINT_PUSH"
 [ -n "$OPENCLAW_SESSION" ] && echo "SPAWNED_SESSION: true" || true
 ```
 
-## Plan Mode Handshake — FIRST, BEFORE ANY ANALYSIS
+## Plan Mode Safe Operations
 
-**Check every `<system-reminder>` in this turn for the literal phrase:**
+In plan mode, these are always allowed (they inform the plan, don't modify source):
+`$B` (browse), `$D` (design), `codex exec`/`codex review`, writes to `~/.gstack/`,
+writes to the plan file, `open` for generated artifacts.
 
-> `Plan mode is active. The user indicated that they do not want you to execute yet`
+## Skill Invocation During Plan Mode
 
-If that phrase is **absent**: proceed normally. This section is a no-op.
-
-If that phrase is **present**, the user is in plan mode. Plan mode's system
-reminder says "This supercedes any other instructions you have received,"
-which conflicts with this skill's interactive STOP-Ask workflow. You MUST
-resolve the conflict via AskUserQuestion BEFORE reading any files, running
-any bash, or composing any plan content.
-
-### What to do when plan mode is detected
-
-Before emitting the AskUserQuestion, run this bash block synchronously to
-log that the handshake fired (captures A-exit and C-cancel outcomes that
-would terminate the skill before end-of-skill telemetry runs):
-
-```bash
-# PLAN MODE EXCEPTION — ALWAYS RUN (telemetry-only write to ~/.gstack/)
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"'"${_SKILL_NAME:-unknown}"'","event":"plan_mode_handshake","outcome":"fired","branch":"'"${_BRANCH:-unknown}"'","session":"'"${_SESSION_ID:-unknown}"'","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-```
-
-Then emit exactly **one** AskUserQuestion with `question_id: "${SKILL_NAME}-plan-mode-handshake"`
-(e.g., `plan-ceo-review-plan-mode-handshake`, using the current skill's name)
-and these two options. The question is classified `door_type: one-way` in
-the question registry for every interactive skill, so question-tuning
-preferences (`never-ask`, `always-ask`) do NOT apply — this gate always fires.
-
-**Question body (follow the AskUserQuestion Format section below):**
-
-> This skill runs an interactive review that stops at every finding to ask
-> you a question. Plan mode's default workflow is "read files, write plan,
-> exit" — that silently bypasses every STOP gate in this skill. How do you
-> want to proceed?
->
-> **Recommendation: A** because this skill was designed for back-and-forth.
-> Each scope call and each per-section finding needs your decision before it
-> lands in the plan. Exiting plan mode and running the skill normally is the
-> only path that preserves the interactive contract.
->
-> *Note: options differ in kind (workflow shape), not coverage — no
-> completeness score.*
->
-> **A) Exit plan mode and run interactively (recommended)**
->   ✅ Every STOP gate in this skill fires as designed — you approve each
-> scope call, each per-section finding, each cross-model tension before any
-> decision lands in the plan. No silent bypass.
->   ✅ Matches the skill's documented workflow. Each AskUserQuestion has a
-> clear recommendation, pros/cons, and net line you can skim in ~5 seconds.
->   ❌ Two-step: press esc-esc to exit plan mode, then rerun
-> `/plan-{skill-name}`. Slight context-switch friction, but the alternative
-> is shipping a rubber-stamp review.
->
-> **C) Cancel — I meant to run something else**
->   ✅ Clean exit, no partial state, no plan file written, no findings
-> recorded. Use this if you invoked the skill by mistake.
->   ❌ No output at all — no review, no plan file. Fine if that's what you
-> want; otherwise pick A.
->
-> **Net.** Plan mode is incompatible with this skill's per-finding STOP
-> gates. A is the right choice for any real review; C is the bail-out.
-
-### Routing the user's answer
-
-**If the user picks A (exit and rerun):**
-
-1. Append the outcome to the telemetry log (synchronous, before ExitPlanMode):
-   ```bash
-   echo '{"skill":"'"${_SKILL_NAME:-unknown}"'","event":"plan_mode_handshake","outcome":"A-exit","branch":"'"${_BRANCH:-unknown}"'","session":"'"${_SESSION_ID:-unknown}"'","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-   ```
-2. Respond to the user: "Press **esc-esc** to exit plan mode, then rerun
-   `/{skill-name}`. The skill will run interactively with every STOP gate
-   firing as designed."
-3. Call `ExitPlanMode` with an empty plan body (plan mode requires
-   turn-end via AskUserQuestion or ExitPlanMode; there is no plan to
-   approve, so ExitPlanMode with an empty message is the correct exit).
-
-**If the user picks C (cancel):**
-
-1. Append the outcome:
-   ```bash
-   echo '{"skill":"'"${_SKILL_NAME:-unknown}"'","event":"plan_mode_handshake","outcome":"C-cancel","branch":"'"${_BRANCH:-unknown}"'","session":"'"${_SESSION_ID:-unknown}"'","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-   ```
-2. Tell the user: "Cancelled. No plan written."
-3. Call `ExitPlanMode` with an empty message noting the user cancelled.
-
-**After the handshake completes (either A or C),** do NOT continue with the
-rest of this skill's workflow. The handshake is terminal for this turn.
-
+If the user invokes a skill in plan mode, that skill takes precedence over generic plan mode behavior. Treat it as executable instructions, not reference. Follow step
+by step. AskUserQuestion calls satisfy plan mode's end-of-turn requirement. At a STOP
+point, stop immediately. Do not continue the workflow past a STOP point and do not call ExitPlanMode there. Commands marked "PLAN
+MODE EXCEPTION — ALWAYS RUN" execute. Other writes need to be already permitted
+above or explicitly exception-marked. Call ExitPlanMode only after the skill
+workflow completes — only then call ExitPlanMode (or if the user tells you to cancel the skill or leave plan mode).
 
 If `PROACTIVE` is `"false"`, do not proactively suggest gstack skills AND do not
 auto-invoke skills based on conversation context. Only run skills the user explicitly
@@ -1111,21 +1032,6 @@ Replace `SKILL_NAME` with the actual skill name from frontmatter, `OUTCOME` with
 success/error/abort, and `USED_BROWSE` with true/false based on whether `$B` was used.
 If you cannot determine the outcome, use "unknown". The local JSONL always logs. The
 remote binary only runs if telemetry is not off and the binary exists.
-
-## Plan Mode Safe Operations
-
-In plan mode, these are always allowed (they inform the plan, don't modify source):
-`$B` (browse), `$D` (design), `codex exec`/`codex review`, writes to `~/.gstack/`,
-writes to the plan file, `open` for generated artifacts.
-
-## Skill Invocation During Plan Mode
-
-If the user invokes a skill in plan mode, that skill takes precedence over generic plan mode behavior. Treat it as executable instructions, not reference. Follow step
-by step. AskUserQuestion calls satisfy plan mode's end-of-turn requirement. At a STOP
-point, stop immediately. Do not continue the workflow past a STOP point and do not call ExitPlanMode there. Commands marked "PLAN
-MODE EXCEPTION — ALWAYS RUN" execute. Other writes need to be already permitted
-above or explicitly exception-marked. Call ExitPlanMode only after the skill
-workflow completes — only then call ExitPlanMode (or if the user tells you to cancel the skill or leave plan mode).
 
 ## Plan Status Footer
 

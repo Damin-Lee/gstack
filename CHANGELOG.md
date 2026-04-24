@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.12.1.0] - 2026-04-24
+## [1.12.2.0] - 2026-04-24
 
 ## **`/setup-gbrain` polish: PATH parsing, repo init order, MCP user scope.**
 
@@ -14,6 +14,58 @@ Small refinements to the /setup-gbrain onboarding path.
 
 ### Changed
 - `test/gstack-brain-init-gh-mock.test.ts`: asserts `--source` is absent from the `gh repo create` call.
+
+## [1.12.1.0] - 2026-04-24
+
+## **Plan-mode review skills run the review directly, no more "exit and rerun" prompt.**
+
+Before this release, `/plan-eng-review` (and the three other `interactive: true` review skills) greeted plan-mode users with an A/B/C handshake asking them to exit plan mode and rerun, or cancel. That handshake was vestigial: the preamble already contains an authoritative "Skill Invocation During Plan Mode" rule saying AskUserQuestion satisfies plan mode's end-of-turn requirement. Two contradictory rules, the bossy one at the top won, the review never ran. This release deletes the bossier rule and hoists the correct one to position 1 of the preamble so skills run straight through.
+
+### What shipped
+
+The vestigial `scripts/resolvers/preamble/generate-plan-mode-handshake.ts` resolver is deleted. The "Plan Mode Safe Operations" and "Skill Invocation During Plan Mode" blocks are split out of `generate-completion-status.ts` into a sibling `generatePlanModeInfo()` export in the same module, then wired at preamble position 1 where the handshake used to live. The "you see this first" positioning stays; only the content changes. Four dead plan-mode-handshake question-registry IDs are removed. The `interactive: true` frontmatter flag stays on the four review skill templates because `test/e2e-harness-audit.test.ts` reads it to classify which skills must have `canUseTool` coverage, per codex outside-voice review.
+
+The four per-skill plan-mode E2E tests are rewritten as smoke tests that assert Step 0's actual scope-mode question fires (not an A/B/C handshake), no Write/Edit before the first AskUserQuestion, and no early `ExitPlanMode`. The write-guard helper from the old `plan-mode-handshake-helpers.ts` is preserved in the renamed `plan-mode-helpers.ts` so silent-bypass regressions still get caught. `test/skill-e2e-plan-mode-no-op.test.ts` is kept for the opposite coverage case: the plan-mode-info block stays quiet outside plan mode. `test/gen-skill-docs.test.ts` now scans every generated `SKILL.md` across all 9 host subdirs (`.agents/`, `.openclaw/`, `.kiro/`, etc.) and asserts `## Plan Mode Handshake` is absent. That's a sub-second unit gate blocking any future PR from re-introducing the resolver.
+
+### The numbers that matter
+
+Source: `bun test` on HEAD against the pre-change baseline.
+
+| Metric | Before | After | Δ |
+|---|---|---|---|
+| Preamble resolvers | 19 (handshake + completion-status) | 18 (completion-status owns both functions) | -1 module |
+| Handshake lines in generated SKILL.md | 92 per skill × 4 skills = 368 | 0 | -368 |
+| Question-registry entries | 51 | 47 | -4 dead entries |
+| Plan-mode gate-tier tests | 5 handshake-asserting | 5 smoke + no-op + write-guard | same count, stronger assertions |
+| Multi-host handshake-absence unit test | none | 1 (scans 9 host dirs, <1s) | new regression gate |
+| `bun test` on changed files | 360 gen-skill-docs pass | 360 gen-skill-docs pass | no regression |
+
+The preamble position for the new `## Skill Invocation During Plan Mode` section lands at line ~127 of every `plan-*-review/SKILL.md` (first ~15% of the file), before the upgrade check and onboarding gates, so the authoritative plan-mode rule is the first thing the model reads after bash env setup.
+
+### What this means for plan-mode users
+
+Invoke `/plan-eng-review` from plan mode. You get the scope-mode question (`SCOPE EXPANSION` / `SELECTIVE EXPANSION` / `HOLD SCOPE` / `SCOPE REDUCTION`) immediately, the review runs, each finding gets its own `AskUserQuestion`, `ExitPlanMode` fires at the end. No two-step "exit and rerun" friction. Same for `/plan-ceo-review`, `/plan-design-review`, `/plan-devex-review`.
+
+### Itemized changes
+
+#### Fixed
+
+- `/plan-eng-review`, `/plan-ceo-review`, `/plan-design-review`, `/plan-devex-review` no longer show an A/B/C handshake prompt when invoked in plan mode. Each skill runs its interactive review directly, with every finding gated by `AskUserQuestion` just like outside plan mode.
+
+#### Changed
+
+- The "Plan Mode Safe Operations" and "Skill Invocation During Plan Mode" preamble sections are now emitted at position 1 (right after the bash env setup) instead of at the tail of the completion-status block. All skills see these two sections earlier in the preamble; nothing else changes about the content.
+- `test/helpers/plan-mode-handshake-helpers.ts` is renamed to `test/helpers/plan-mode-helpers.ts`. The exported API is renamed from `runPlanModeHandshakeTest` to `runPlanModeSkillTest` and from `assertHandshakeShape` to `assertNotHandshakeShape`. The write-guard detection (no `Write`/`Edit` tool call before the first `AskUserQuestion`) is preserved and extended with `ExitPlanMode`-before-ask detection.
+
+#### Removed
+
+- `scripts/resolvers/preamble/generate-plan-mode-handshake.ts` deleted (vestigial, superseded by `generatePlanModeInfo` in `generate-completion-status.ts`).
+- Four question-registry entries removed from `scripts/question-registry.ts`: `plan-ceo-review-plan-mode-handshake`, `plan-eng-review-plan-mode-handshake`, `plan-design-review-plan-mode-handshake`, `plan-devex-review-plan-mode-handshake`. These IDs are no longer emitted by any skill; keeping them in the registry was dead weight.
+
+#### For contributors
+
+- `test/gen-skill-docs.test.ts` now has a "plan-mode-info resolver" describe block that (a) scans every generated `SKILL.md` under the repo root plus every host subdir (`.agents/`, `.openclaw/`, `.opencode/`, `.factory/`, `.hermes/`, `.kiro/`, `.cursor/`, `.slate/`) and asserts `## Plan Mode Handshake` is absent, and (b) asserts `## Skill Invocation During Plan Mode` lands in the first 15,000 bytes of each of the four review skills' generated `SKILL.md`. Both assertions run on every `bun test`. Any PR that re-introduces the handshake resolver fails CI immediately.
+- The `interactive: true` frontmatter flag on the four review skill templates is preserved. It still has a reader: `test/e2e-harness-audit.test.ts` uses it to enforce `canUseTool` coverage on interactive review E2E tests. Removing the flag was part of the initial plan; codex outside-voice review caught the downstream dependency during review and that decision was reversed.
 
 ## [1.12.0.0] - 2026-04-24
 

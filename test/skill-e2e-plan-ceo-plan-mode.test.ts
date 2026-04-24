@@ -1,40 +1,38 @@
 /**
- * plan-ceo-review plan-mode handshake E2E (gate tier, paid).
+ * plan-ceo-review plan-mode smoke test (gate tier, paid).
  *
  * Asserts: when /plan-ceo-review is invoked with the plan-mode distinctive
- * phrase in the system reminder, the skill fires AskUserQuestion FIRST
- * (before any Write or Edit), the question has exactly 2 options (A exit,
- * C cancel), picking "Exit" leads to an orderly exit with no plan file
- * written.
+ * phrase in the system reminder, the skill goes STRAIGHT to its Step 0
+ * scope-mode AskUserQuestion. Specifically:
+ *   1. First AskUserQuestion is NOT the old vestigial handshake
+ *      (A=exit-and-rerun / C=cancel).
+ *   2. No Write or Edit tool fires before the first AskUserQuestion
+ *      (catches silent plan-file-write bypass).
+ *   3. ExitPlanMode does not fire before the first AskUserQuestion.
  *
  * Cost: ~$0.50–$1.00 per run. Gated: EVALS=1 EVALS_TIER=gate.
- * Depends on: scripts/resolvers/preamble/generate-plan-mode-handshake.ts,
- * test/helpers/agent-sdk-runner.ts (canUseTool extension).
  */
 
 import { describe, test, expect } from 'bun:test';
 import {
-  runPlanModeHandshakeTest,
-  assertHandshakeShape,
-} from './helpers/plan-mode-handshake-helpers';
+  runPlanModeSkillTest,
+  assertNotHandshakeShape,
+} from './helpers/plan-mode-helpers';
 
 const shouldRun = !!process.env.EVALS && process.env.EVALS_TIER === 'gate';
 const describeE2E = shouldRun ? describe : describe.skip;
 
-describeE2E('plan-ceo-review plan-mode handshake (gate)', () => {
-  test('handshake fires before any Write/Edit when plan mode is detected', async () => {
-    const result = await runPlanModeHandshakeTest({
+describeE2E('plan-ceo-review plan-mode smoke (gate)', () => {
+  test('goes straight to scope-mode question, no handshake, no silent writes', async () => {
+    const result = await runPlanModeSkillTest({
       skillName: 'plan-ceo-review',
-      answerLabel: 'Exit',
+      // Step 0 asks for review mode; HOLD is the cheapest, most-neutral answer.
+      firstAnswerSubstring: 'HOLD',
     });
 
-    // Handshake must have fired at least once.
     expect(result.askUserQuestions.length).toBeGreaterThanOrEqual(1);
-    // Critically: no Write or Edit fired before the first AskUserQuestion.
-    // This is the bug v1.10.2.0 fixes — plan mode used to allow silent
-    // plan-file writes without any interactive gate.
+    assertNotHandshakeShape(result.askUserQuestions[0]!);
     expect(result.writeOrEditBeforeAsk).toBe(false);
-    // Handshake shape: 2 options (Exit/Cancel), Option B dropped per D8.
-    assertHandshakeShape(result.askUserQuestions[0]!);
+    expect(result.exitPlanModeBeforeAsk).toBe(false);
   }, 120_000);
 });

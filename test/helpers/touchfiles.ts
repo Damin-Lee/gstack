@@ -82,16 +82,16 @@ export const E2E_TOUCHFILES: Record<string, string[]> = {
   'plan-eng-review-artifact':  ['plan-eng-review/**'],
   'plan-review-report':        ['plan-eng-review/**', 'scripts/gen-skill-docs.ts'],
 
-  // Plan-mode handshake (v1.10.2.0) — gate-tier safety regression tests.
-  // Each fires when any of: the interactive skill's template, the resolver,
-  // preamble composition, the Agent SDK harness, the question registry, or
-  // the one-way-door classifier changes.
-  'plan-ceo-review-plan-mode':    ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
-  'plan-eng-review-plan-mode':    ['plan-eng-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
-  'plan-design-review-plan-mode-handshake': ['plan-design-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
-  'plan-devex-review-plan-mode':  ['plan-devex-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'scripts/question-registry.ts', 'scripts/one-way-doors.ts', 'test/helpers/agent-sdk-runner.ts'],
-  'plan-mode-no-op':              ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts'],
-  'e2e-harness-audit':            ['plan-ceo-review/**', 'plan-eng-review/**', 'plan-design-review/**', 'plan-devex-review/**', 'scripts/resolvers/preamble/generate-plan-mode-handshake.ts', 'test/helpers/agent-sdk-runner.ts'],
+  // Plan-mode smoke tests — gate-tier safety regression tests. Each fires when
+  // any of: the interactive skill's template, the plan-mode resolver
+  // (completion-status now owns generatePlanModeInfo), preamble composition,
+  // the Agent SDK harness, or the shared plan-mode-helpers change.
+  'plan-ceo-review-plan-mode':    ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
+  'plan-eng-review-plan-mode':    ['plan-eng-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
+  'plan-design-review-plan-mode': ['plan-design-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
+  'plan-devex-review-plan-mode':  ['plan-devex-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
+  'plan-mode-no-op':              ['plan-ceo-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'scripts/resolvers/preamble.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
+  'e2e-harness-audit':            ['plan-ceo-review/**', 'plan-eng-review/**', 'plan-design-review/**', 'plan-devex-review/**', 'scripts/resolvers/preamble/generate-completion-status.ts', 'test/helpers/agent-sdk-runner.ts', 'test/helpers/plan-mode-helpers.ts'],
   'brain-privacy-gate':           ['scripts/resolvers/preamble/generate-brain-sync-block.ts', 'scripts/resolvers/preamble.ts', 'bin/gstack-brain-sync', 'bin/gstack-brain-init', 'bin/gstack-config', 'test/helpers/agent-sdk-runner.ts'],
 
   // AskUserQuestion format regression (RECOMMENDATION + Completeness: N/10)
@@ -332,7 +332,7 @@ export const E2E_TIERS: Record<string, 'gate' | 'periodic'> = {
   // Plan-mode handshake — deterministic safety regression, gate-tier
   'plan-ceo-review-plan-mode': 'gate',
   'plan-eng-review-plan-mode': 'gate',
-  'plan-design-review-plan-mode-handshake': 'gate',
+  'plan-design-review-plan-mode': 'gate',
   'plan-devex-review-plan-mode': 'gate',
   'plan-mode-no-op': 'gate',
   'e2e-harness-audit': 'gate',
