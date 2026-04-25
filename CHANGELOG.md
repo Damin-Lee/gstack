@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.8.0.0] - 2026-04-25
+
+## **Two new browser primitives that compound the agent over time. Per-site notes save what works once and reuse it. Raw CDP gets a tightly-scoped escape hatch.**
+
+The agent learns LinkedIn's iframe trick once and remembers it next session. That's the whole pitch. `$B domain-skill save` writes a per-site markdown note keyed to the active tab's hostname; future sessions on that host get the note injected into their prompt. New skills land quarantined, auto-promote to active after 3 successful uses without classifier flags, and stay per-project unless you explicitly promote to global. Storage piggybacks on `/learn`'s JSONL so the same tooling works.
+
+`$B cdp <Domain.method>` is the escape hatch when curated commands miss. Deny-default by construction: ~25 read-only methods are pre-allowed (Accessibility tree, DOM/CSS inspection, Performance metrics, screenshots, viewport overrides). Adding a method requires a PR with a one-line justification. Dangerous methods that would be RCE or silent exfil if exposed (`Runtime.evaluate`, `Page.navigate`, `Network.getResponseBody`, `Browser.close`, `Target.attachToTarget`, etc.) are intentionally absent and verified absent by a unit test.
+
+Both features went through CEO review (9 decisions), DevEx review (5/10 to 8/10), Eng review, and a brutal Codex outside-voice pass. Codex's pass rolled back significant scope: a planned "agents author their own gstack commands" expansion was deferred to a P1 TODO with "needs out-of-process isolation design" attached, because in-daemon agent-authored TypeScript can't be safely contained with AST + approval gate alone. The shipped scope is what the security model actually defends.
+
+### The numbers that matter
+
+Source: 30 unit tests in `browse/test/` (`domain-skills-storage.test.ts`, `cdp-allowlist.test.ts`, `cdp-mutex.test.ts`, `telemetry.test.ts`), all passing in under one second.
+
+| Surface | Shape |
+|---|---|
+| New `$B` commands | `domain-skill` (8 subcommands), `cdp` |
+| New modules | 7 (`domain-skills.ts`, `domain-skill-commands.ts`, `cdp-allowlist.ts`, `cdp-bridge.ts`, `cdp-commands.ts`, `project-slug.ts`, `telemetry.ts`) |
+| Lines of agent-facing TypeScript shipped | ~1100 (including 350+ of allowlist + state machine + mutex tests) |
+| Curated CDP allowlist size | 25 methods, deny-default |
+| Dangerous CDP surfaces verified absent | 18 (Runtime/Debugger/Page navigation/Network exfil/Browser/Target) |
+| Codex outside-voice findings resolved | 7 of 20 (12 mooted by T1 scope drop) |
+| State-machine transitions covered by tests | 6 (save to quarantined, 3-use auto-promote, classifier-flag-blocks-promotion, promote-to-global, rollback, tombstone) |
+
+### What this means for builders
+
+Domain skills are how an agent gets faster on a site over time. The first time it figures out LinkedIn's apply-button iframe, it costs minutes. Save that as a skill and the next session starts already knowing it. Across a sprint of repetitive site work, you'll feel the compounding inside a week. To opt into cross-project compounding (your LinkedIn skill follows you to every project, for instance), one explicit `$B domain-skill promote-to-global` per skill. Never silent, because Codex correctly argued that silent cross-project leakage is a privacy and contamination vector.
+
+`$B cdp` exists for the rare case you need raw CDP. Use it when curated commands don't fit, file a PR adding the method to the allowlist when you're done so the next agent doesn't need it. Or, if you don't want gstack's rails at all, the README now plugs [browser-use/browser-harness-js](https://github.com/browser-use/browser-harness-js): different philosophy, different tradeoffs, also good.
+
+### Itemized changes
+
+#### Added
+
+- `$B domain-skill save|list|show|edit|promote-to-global|rollback|rm`. Host derived from active tab's top-level origin, closing a confused-deputy class of bugs. Body via stdin or `--from-file`, never inline argv.
+- `$B cdp <Domain.method> [json-params]`. Deny-default allowlist (`browse/src/cdp-allowlist.ts`). Output for data-exfil methods wrapped in UNTRUSTED envelope.
+- Two-tier CDP mutex in `browser-manager.ts`: per-tab plus global escalation, 5-second acquire timeout with `try/finally` release.
+- Lightweight telemetry in `~/.gstack/analytics/browse-telemetry.jsonl` for `domain_skill_*` and `cdp_method_*` signals. Fire-and-forget. Hostname and method only. `GSTACK_TELEMETRY_OFF=1` silences.
+- Sidebar-agent prompt context now injects per-project plus global domain skills matching the active tab's hostname, wrapped in UNTRUSTED markers.
+- `docs/domain-skills.md` reference plus error lookup table.
+- README plug for browser-harness-js as the no-rails alternative.
+
+#### Changed
+
+- `browse/src/server.ts` `spawnClaude` is now async to await `readSkill`. The system prompt has a one-line introduction to `$B domain-skill` so agents discover the feature.
+- `browse/src/commands.ts` registers `domain-skill` and `cdp` as META commands.
+
+#### For contributors
+
+- `browse/src/domain-skills.ts` is the storage layer. Tests in `browse/test/domain-skills-storage.test.ts` lock in the state machine.
+- Adding a CDP method: edit `browse/src/cdp-allowlist.ts`, add `{domain, method, scope, output, justification}`. The `cdp-allowlist.test.ts` linter enforces all four fields.
+- The full review trail (CEO + DevEx + Eng + Codex) is in `~/.claude/plans/system-instruction-you-are-working-drifting-alpaca.md` for posterity.
+
 ## [1.7.0.0] - 2026-04-22
 
 ## **Your gstack memory now travels with you. Cross-machine brain via a private git repo + optional GBrain indexing, no daemon, no credential leaks.**
