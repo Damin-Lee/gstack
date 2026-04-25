@@ -20,6 +20,7 @@
 import type { Page } from 'playwright';
 import type { BrowserManager } from './browser-manager';
 import { lookupCdpMethod, type CdpAllowEntry } from './cdp-allowlist';
+import { logTelemetry } from './telemetry';
 
 const CDP_TIMEOUT_MS = 5000;
 const CDP_ACQUIRE_TIMEOUT_MS = 5000;
@@ -62,6 +63,9 @@ export async function dispatchCdpCall(input: CdpDispatchInput): Promise<CdpDispa
   const qualified = `${input.domain}.${input.method}`;
   const entry = lookupCdpMethod(qualified);
   if (!entry) {
+    // Surface the denial via telemetry — this is the data that drives the
+    // next allow-list expansion (DX D9: cdp_method_denied counter).
+    logTelemetry({ event: 'cdp_method_denied', domain: input.domain, method: input.method });
     throw new Error(
       `DENIED: ${qualified} is not on the CDP allowlist.\n` +
         `Cause: deny-default posture; method has not been audited and added to cdp-allowlist.ts.\n` +
@@ -69,10 +73,14 @@ export async function dispatchCdpCall(input: CdpDispatchInput): Promise<CdpDispa
     );
   }
   // Acquire the right tier of lock.
+  const acquireStart = Date.now();
   const release =
     entry.scope === 'browser'
       ? await input.bm.acquireGlobalCdpLock(CDP_ACQUIRE_TIMEOUT_MS)
       : await input.bm.acquireTabLock(input.tabId, CDP_ACQUIRE_TIMEOUT_MS);
+  const acquireMs = Date.now() - acquireStart;
+  logTelemetry({ event: 'cdp_method_lock_acquire_ms', domain: input.domain, method: input.method, ms: acquireMs });
+  logTelemetry({ event: 'cdp_method_called', domain: input.domain, method: input.method, allowed: true, scope: entry.scope });
 
   try {
     const page = input.bm.getPageForTab(input.tabId);
