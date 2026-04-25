@@ -994,6 +994,7 @@ Refs are invalidated on navigation — run `snapshot` again after `goto`.
 | Command | Description |
 |---------|-------------|
 | `attrs <sel|@ref>` | Element attributes as JSON |
+| `cdp <Domain.method> [json-params]` | Raw CDP method dispatch (deny-default; allowlist in cdp-allowlist.ts). Output through UNTRUSTED envelope when method is data-exfil. |
 | `console [--clear|--errors]` | Console messages (--errors filters to error/warning) |
 | `cookies` | All cookies as JSON |
 | `css <sel> <prop>` | Computed CSS value |
@@ -1025,6 +1026,7 @@ Refs are invalidated on navigation — run `snapshot` again after `goto`.
 | Command | Description |
 |---------|-------------|
 | `chain` | Run commands from JSON stdin. Format: [["cmd","arg1",...],...] |
+| `domain-skill save|list|show|edit|promote-to-global|rollback|rm <host?>` | Per-site notes (host derived from active tab). Quarantined → active after N=3 uses without classifier flag → global by explicit promote. |
 | `frame <sel|@ref|--name n|--url pattern|main>` | Switch to iframe context (or main to return) |
 | `inbox [--clear]` | List messages from sidebar scout inbox |
 | `watch [stop]` | Passive observation — periodic snapshots while user browses |
