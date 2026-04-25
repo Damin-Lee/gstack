@@ -188,3 +188,134 @@ Each browser tab can run its own agent simultaneously:
 | Queue file | `~/.gstack/sidebar-agent-queue.jsonl` | Filesystem |
 | State file | `.gstack/browse.json` | Filesystem |
 | Chat log | `~/.gstack/sessions/<id>/chat.jsonl` | Filesystem |
+
+## Terminal flow
+
+The sidebar has a second primary tab next to Chat: **Terminal**. Where Chat
+spawns one-shot `claude -p` per message, Terminal runs **interactive
+`claude` in a real PTY** with xterm.js as the renderer.
+
+### Components
+
+```
+┌─────────────────┐     ┌──────────────┐     ┌──────────────────┐
+│ sidepanel.js +  │────▶│  server.ts   │────▶│terminal-agent.ts │
+│  -terminal.js   │     │  (compiled)  │     │  (non-compiled)  │
+│  (xterm.js)     │     │              │     │  PTY listener    │
+└─────────────────┘     └──────────────┘     └──────────────────┘
+        ▲                       │                      │
+        │  ws://127.0.0.1:<termPort>/ws (cookie auth)   │ Bun.spawn(claude)
+        └───────────────────────┼──────────────────────▶│ terminal: {data}
+                                │                      ▼
+                                │              ┌──────────────────┐
+                                │              │  claude PTY      │
+                                │              └──────────────────┘
+            POST /pty-session   │
+            (Bearer AUTH_TOKEN) │
+                                ▼
+                       ┌──────────────────┐
+                       │ pty-session-     │
+                       │ cookie.ts        │
+                       │ (HttpOnly cookie)│
+                       └──────────────────┘
+                                │
+                                │ POST /internal/grant (loopback)
+                                ▼
+                       ┌──────────────────┐
+                       │  validTokens Set │
+                       │  in agent memory │
+                       └──────────────────┘
+```
+
+### Startup + first-key timeline
+
+```
+T+0ms     CLI runs `$B connect`
+            ├── Server starts (compiled)
+            └── Spawns terminal-agent.ts via `bun run`
+
+T+500ms   terminal-agent.ts boots
+            ├── Bun.serve on 127.0.0.1:0 (random port)
+            ├── Writes <stateDir>/terminal-port (server reads it for /health)
+            ├── Writes <stateDir>/terminal-internal-token (loopback handshake)
+            └── Probes claude → writes claude-available.json
+
+T+1-3s    Extension loads, sidebar opens
+            ├── Terminal tab is default-active
+            ├── sidepanel-terminal.js: setState(IDLE), shows "Press any key"
+            └── No PTY spawned yet (lazy)
+
+T+user-keys  First keystroke fires onAnyKey
+            ├── POST /pty-session (Authorization: Bearer AUTH_TOKEN)
+            │   └── server mints cookie, posts /internal/grant to agent
+            │   └── responds with Set-Cookie: gstack_pty=<HttpOnly>
+            │   └── responds with terminalPort
+            ├── GET /claude-available (preflight)
+            ├── new WebSocket(ws://127.0.0.1:<terminalPort>/ws)
+            │   └── Browser carries gstack_pty cookie + Origin automatically
+            │   └── Agent validates Origin AND cookie BEFORE upgrading
+            ├── On upgrade success, send {type:"resize"} then a single byte
+            └── Agent message handler sees first byte → spawnClaude()
+```
+
+### Dual-token model
+
+| Token | Lives in | Used for | Lifetime |
+|-------|----------|----------|----------|
+| `AUTH_TOKEN` | `<stateDir>/browse.json`; in-memory in server.ts | `/pty-session` POST (mint cookie) | server lifetime |
+| `gstack_pty` cookie | Browser HttpOnly jar; agent `validTokens` Set | `/ws` upgrade auth | 30 min, dies on WS close |
+| `INTERNAL_TOKEN` | `<stateDir>/terminal-internal-token`; in agent memory | server → agent loopback `/internal/grant` | agent lifetime |
+
+`AUTH_TOKEN` is **never** valid for `/ws` directly. The cookie is **never**
+valid for `/pty-session` or `/command`. Strict separation prevents an SSE
+or sidebar-chat token leak from escalating into shell access.
+
+### Threat model
+
+The Terminal tab **bypasses the entire prompt-injection security stack**
+(`content-security.ts` datamarking, `security-classifier.ts` ML scoring,
+canary detection, ensemble verdicts). On the Terminal tab the user is
+typing directly to claude — there is no untrusted page content in the
+loop, so the threat model is "user trusts themselves," same as opening
+a terminal locally.
+
+That trust assumption is load-bearing on three transport-layer guarantees:
+
+1. **Local-only listener.** `terminal-agent.ts` binds `127.0.0.1` only.
+   The dual-listener tunnel surface (server.ts:95 `TUNNEL_PATHS`) does
+   **not** include `/pty-session` or `/terminal/*`, so the tunnel returns
+   404 by default-deny.
+2. **Origin gate.** `/ws` upgrades require
+   `Origin: chrome-extension://<id>`. A localhost web page cannot mount a
+   cross-site WebSocket hijack against the shell because its Origin is
+   a regular `http(s)://...`.
+3. **Cookie auth.** `gstack_pty` is HttpOnly + SameSite=Strict, scoped to
+   the local listener, minted only by an authenticated `/pty-session`
+   POST. JS injected into a page can't read it; cross-site requests
+   can't send it.
+
+Drop any of those three and the whole tab becomes unsafe.
+
+### Lifecycle
+
+- **Lazy spawn**: claude is not started until the user types a key. Idle
+  sidebar opens cost nothing.
+- **One PTY per WS**: closing the WebSocket SIGINTs claude, then SIGKILLs
+  after 3s. The `gstack_pty` cookie is also revoked so a stolen cookie
+  can't be replayed against a new PTY.
+- **No auto-reconnect**: when the WS closes the user sees "Session ended,
+  click to start a new session." Auto-reconnect would burn a fresh
+  claude session every reload. v1.1 may add session resumption keyed on
+  tab/session id (see TODOS).
+
+### Files
+
+| Component | File | Runs in |
+|-----------|------|---------|
+| Terminal UI | `extension/sidepanel-terminal.js` + xterm.js in `extension/lib/` | Chrome side panel |
+| PTY agent | `browse/src/terminal-agent.ts` | Bun (non-compiled, can spawn) |
+| Cookie store | `browse/src/pty-session-cookie.ts` | Bun (compiled, in server.ts) |
+| Port file | `<stateDir>/terminal-port` | Filesystem |
+| Internal token | `<stateDir>/terminal-internal-token` | Filesystem |
+| Claude probe | `<stateDir>/claude-available.json` | Filesystem |
+| Active tab | `<stateDir>/active-tab.json` | Filesystem (claude reads) |

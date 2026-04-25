@@ -225,12 +225,24 @@ When you need to interact with a browser (QA, dogfooding, cookie setup), use the
 project uses.
 
 **Sidebar architecture:** Before modifying `sidepanel.js`, `background.js`,
-`content.js`, `sidebar-agent.ts`, or sidebar-related server endpoints, read
-`docs/designs/SIDEBAR_MESSAGE_FLOW.md`. It documents the full initialization
-timeline, message flow, auth token chain, tab concurrency model, and known
-failure modes. The sidebar spans 5 files across 2 codebases (extension + server)
-with non-obvious ordering dependencies. The doc exists to prevent the kind of
+`content.js`, `sidebar-agent.ts`, `terminal-agent.ts`, or sidebar-related
+server endpoints, read `docs/designs/SIDEBAR_MESSAGE_FLOW.md`. It documents
+the full initialization timeline, message flow, auth token chain, tab
+concurrency model, the Terminal-tab PTY flow, and known failure modes.
+The sidebar spans 6 files across 2 codebases (extension + server) with
+non-obvious ordering dependencies. The doc exists to prevent the kind of
 silent failures that come from not understanding the cross-component flow.
+
+**Terminal tab is its own process.** `terminal-agent.ts` is a separate
+non-compiled bun process from `sidebar-agent.ts`. Do not bolt PTY logic
+onto sidebar-agent — codex confirmed it would couple chat reliability to
+PTY framing bugs. Cookie minting (`pty-session-cookie.ts`) lives in the
+server; the cookie travels via `Set-Cookie` and back via `Cookie:` on the
+WebSocket upgrade. The WS upgrade gates on Origin AND cookie; both are
+load-bearing for the Terminal tab to be safe. `/health` MUST NOT surface
+the cookie value or any shell-grant token (codex finding: existing
+`AUTH_TOKEN` is already exposed there in headed mode; that's a separate
+v1.1+ TODO, not something to widen).
 
 **Transport-layer security** (v1.6.0.0+). When `pair-agent` starts an ngrok tunnel,
 the daemon binds two HTTP listeners: a local listener (127.0.0.1, full command
