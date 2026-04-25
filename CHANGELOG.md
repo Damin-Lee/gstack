@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.13.0.0] - 2026-04-25
+
+## **`/gstack-claude` gives non-Claude hosts a read-only outside voice.**
+
+This release adds the reverse of `/codex`: external hosts can now ask Claude for review, adversarial challenge, or read-only consultation without handing nested Claude mutation tools.
+
+### Added
+
+- `claude/SKILL.md.tmpl`: new external-only `/gstack-claude` skill with `review`, `challenge`, and `consult` modes.
+- Review and challenge mode feed the detected base-branch diff to `claude -p --tools ""` with `--disable-slash-commands`.
+- Consult mode allows only `Read,Grep,Glob`, explicitly disallows `Bash,Edit,Write`, saves `.context/claude-session-id`, and can resume the prior consult session.
+- Claude prompt transport now uses a `/tmp/gstack-claude-prompt-*` file piped over stdin with cleanup.
+- Auth checks require the `claude` CLI plus either `~/.claude/.credentials.json` or `ANTHROPIC_API_KEY`.
+- JSON output parsing extracts `result`, `usage`, `model`, `session_id`, and `is_error`.
+
+### Fixed
+
+- `hosts/claude.ts`: excludes the Claude outside-voice skill from Claude-host generation.
+- `test/brain-sync.test.ts`: the `GSTACK_HOME` isolation test now snapshots and preserves the real config file instead of assuming local machine state.
+- `model-overlays/opus-4-7.md`: restores the fanout nudge expected by the Opus overlay regression test.
+
+### Changed
+
+- `test/skill-validation.test.ts`: the tracked-file-size check is now advisory. Large fixtures remain allowed in git and are reported as `[size-warning]` instead of failing the suite.
+- `test/gen-skill-docs.test.ts`: generation coverage now asserts external host docs include `gstack-claude/SKILL.md` while Claude host output omits `claude/SKILL.md`.
+
 ## [1.12.2.0] - 2026-04-24
 
 ## **`/setup-gbrain` polish: PATH parsing, repo init order, MCP user scope.**
