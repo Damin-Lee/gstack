@@ -166,8 +166,25 @@
       fitAddon = new FitAddonModule.FitAddon();
       term.loadAddon(fitAddon);
     }
+    // CRITICAL: caller must make els.mount visible BEFORE invoking
+    // ensureXterm. xterm.js measures the container synchronously inside
+    // term.open() — if the mount is display:none, xterm caches a 0-size
+    // viewport and never auto-grows even after the container goes
+    // visible. The visible-first pattern is enforced by connect()
+    // calling setState(STATE.LIVE) before us.
     term.open(els.mount);
-    fitAddon && fitAddon.fit();
+    // First fit waits for the next paint frame so the browser has
+    // applied the .active class transition. Otherwise term.cols/rows
+    // can come back as the minimum (2x2) when the mount's clientHeight
+    // is still being computed.
+    requestAnimationFrame(() => {
+      try {
+        fitAddon && fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      } catch {}
+    });
 
     const ro = new ResizeObserver(() => {
       try {
@@ -224,9 +241,13 @@
       return;
     }
 
-    ensureXterm();
+    // setState(LIVE) flips terminal-mount from display:none to display:flex.
+    // We MUST do that BEFORE ensureXterm() — xterm.js measures the container
+    // synchronously inside term.open() and a hidden container yields a 0x0
+    // terminal that never recovers. ensureXterm + the requestAnimationFrame
+    // fit() inside it run after the browser has applied the layout.
     setState(STATE.LIVE);
-    fitAddon && fitAddon.fit();
+    ensureXterm();
 
     // Token rides on Sec-WebSocket-Protocol — the only auth header the
     // browser WebSocket API lets us set. Cross-port HttpOnly cookies with

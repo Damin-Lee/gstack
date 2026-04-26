@@ -676,9 +676,19 @@ body::after {
 .tab-content.active { display: flex; flex-direction: column; }
 
 /* ─── Terminal Tab ────────────────────────────────────────────── */
+/* The Terminal pane manages its own scrolling (xterm has a viewport with
+   scrollback). The default .tab-content rules above set overflow-y: auto,
+   which collapses min-height for nested flex children — that's why
+   .terminal-mount couldn't grow to fill available space. Override here. */
 #tab-terminal {
   background: #0a0a0a;
   padding: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+#tab-terminal.active {
+  display: flex;
+  flex-direction: column;
 }
 .terminal-toolbar {
   display: flex;
@@ -746,11 +756,21 @@ body::after {
 }
 .install-retry-btn:hover { opacity: 0.9; }
 .terminal-mount {
-  flex: 1;
+  /* min-height: 0 is the standard flex-overflow fix — without it, a flex
+     item with overflowing content can't shrink below its content size,
+     so flex:1 refuses to expand into available space and xterm renders
+     into whatever the content happens to be (i.e. its own initial 2x2
+     measurement). With min-height:0 the item respects the flex parent's
+     remaining space and xterm grows to fill it. */
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
   background: #0a0a0a;
   padding: 8px;
   box-sizing: border-box;
+  /* position: relative so xterm's absolutely-positioned helpers (the
+     hidden textarea for input) anchor inside us, not on body. */
+  position: relative;
 }
 .terminal-mount .xterm,
 .terminal-mount .xterm .xterm-viewport,
