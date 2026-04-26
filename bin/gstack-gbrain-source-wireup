@@ -81,14 +81,22 @@ elif [ -n "${GBRAIN_DATABASE_URL:-}" ]; then
 elif [ -n "${DATABASE_URL:-}" ]; then
   _locked_url="$DATABASE_URL"
 elif [ -f "$GBRAIN_CONFIG" ]; then
-  _locked_url=$(python3 -c "
+  # Python heredoc reads config.json. On JSON parse failure or any IO error,
+  # we WARN (not silently swallow) so the user knows the URL lock fell back
+  # to gbrain's own loadConfig (which would still read this same file).
+  _py_err=$(mktemp -t wireup-pyerr 2>/dev/null || mktemp /tmp/wireup-pyerr.XXXXXX)
+  _locked_url=$(GBRAIN_CONFIG_PATH="$GBRAIN_CONFIG" python3 -c '
 import json, os, sys
 try:
-    c = json.load(open(os.path.expanduser('~/.gbrain/config.json')))
-    print(c.get('database_url',''))
-except Exception:
-    pass
-" 2>/dev/null)
+    c = json.load(open(os.environ["GBRAIN_CONFIG_PATH"]))
+    print(c.get("database_url",""))
+except FileNotFoundError:
+    sys.exit(0)
+except Exception as e:
+    print(f"config.json parse error: {e}", file=sys.stderr)
+    sys.exit(1)
+' </dev/null 2>"$_py_err") || warn "could not read $GBRAIN_CONFIG ($(cat "$_py_err" 2>/dev/null)); URL not locked"
+  rm -f "$_py_err" 2>/dev/null
 fi
 if [ -n "$_locked_url" ]; then
   export GBRAIN_DATABASE_URL="$_locked_url"
@@ -96,7 +104,23 @@ fi
 
 prefix() { sed 's/^/gstack-gbrain-source-wireup: /' >&2; }
 warn()   { echo "$*" | prefix; }
-die()    { warn "$*"; exit "${2:-1}"; }
+# die <message> [exit_code]: warn with just the message, exit with code (default 1).
+die()    { warn "$1"; exit "${2:-1}"; }
+
+# Refuse to rm anything outside $HOME/. Defends against GSTACK_BRAIN_WORKTREE=/
+# or empty-string overrides that would otherwise have line 169 / 161 nuke the
+# user's home or root.
+safe_rm_worktree() {
+  local target="$1"
+  case "$target" in
+    "" | "/" | "/Users" | "/Users/" | "$HOME" | "$HOME/" )
+      die "refusing to rm dangerous path: $target" 1 ;;
+  esac
+  case "$target" in
+    "$HOME"/*) rm -rf "$target" ;;
+    *) die "refusing to rm path outside \$HOME: $target" 1 ;;
+  esac
+}
 
 # ---- source-id derivation (D6 multi-fallback) ----
 derive_source_id() {
@@ -159,24 +183,33 @@ ensure_worktree() {
       # (uncommitted changes in the detached worktree, ref ambiguity, etc).
       ( cd "$WORKTREE" && git checkout --detach "$sha" 2>&1 | prefix; exit "${PIPESTATUS[0]}" ) || {
         warn "worktree at $WORKTREE could not advance to $sha; resetting via remove + re-add"
-        git -C "$GSTACK_HOME" worktree remove --force "$WORKTREE" 2>/dev/null || rm -rf "$WORKTREE"
+        git -C "$GSTACK_HOME" worktree remove --force "$WORKTREE" 2>/dev/null || safe_rm_worktree "$WORKTREE"
         _worktree_add_detached || return 1
       }
     fi
     return 0
   fi
   # Stray non-git dir? Remove first.
-  [ -e "$WORKTREE" ] && rm -rf "$WORKTREE"
+  [ -e "$WORKTREE" ] && safe_rm_worktree "$WORKTREE"
   _worktree_add_detached || return 1
 }
 
 # ---- gbrain sources operations ----
 # Returns 0 if source with id exists at expected path. 1 if exists but path differs. 2 if absent.
+# Hard-fails (exits non-zero via die) if jq is missing — without jq we cannot
+# distinguish "absent" from "missing-tool" and would falsely re-add an existing
+# source. jq is documented as a dependency of gstack-gbrain-detect (transitive)
+# but adversarial review flagged the silent-fall-through path; this probe makes
+# the failure mode loud.
 check_source_state() {
   local id="$1"
+  if ! command -v jq >/dev/null 2>&1; then
+    die "jq required for source state detection. Install jq (brew install jq) and re-run." 1
+  fi
   local existing_path
   existing_path=$(gbrain sources list --json 2>/dev/null \
-    | jq -r --arg id "$id" '.sources[] | select(.id==$id) | .local_path' 2>/dev/null) || existing_path=""
+    | jq -r --arg id "$id" '.sources[] | select(.id==$id) | .local_path' 2>/dev/null \
+    | tr -d '[:space:]') || existing_path=""
   if [ -z "$existing_path" ]; then
     return 2
   fi
@@ -252,10 +285,23 @@ do_wireup() {
   case "$sstate" in
     0) : ;;  # already correctly registered
     1)
-      warn "source $id registered with different path; recreating (gbrain has no 'sources update')"
-      gbrain sources remove "$id" --yes 2>&1 | prefix || die "gbrain sources remove failed" 1
-      gbrain sources add "$id" --path "$WORKTREE" --federated 2>&1 | prefix \
-        || die "gbrain sources add failed" 1
+      # Multi-Mac case: if the existing path also looks like another machine's
+      # brain-worktree (same basename, different parent), don't ping-pong the
+      # registration. Just sync from our local worktree — gbrain stores pages
+      # by content, not by local_path. The metadata is informational only.
+      local existing_path
+      existing_path=$(gbrain sources list --json 2>/dev/null \
+        | jq -r --arg id "$id" '.sources[] | select(.id==$id) | .local_path' 2>/dev/null \
+        | tr -d '[:space:]') || existing_path=""
+      if [ "$(basename "$existing_path")" = "$(basename "$WORKTREE")" ] \
+         && [ "$existing_path" != "$WORKTREE" ]; then
+        warn "source $id is registered at $existing_path (likely another machine's local copy of the same brain repo). Skipping re-registration; will sync from local worktree."
+      else
+        warn "source $id registered with different path; recreating (gbrain has no 'sources update')"
+        gbrain sources remove "$id" --yes 2>&1 | prefix || die "gbrain sources remove failed" 1
+        gbrain sources add "$id" --path "$WORKTREE" --federated 2>&1 | prefix \
+          || die "gbrain sources add failed" 1
+      fi
       ;;
     2)
       gbrain sources add "$id" --path "$WORKTREE" --federated 2>&1 | prefix \
@@ -270,8 +316,14 @@ do_wireup() {
     exit 0
   fi
 
-  local sync_out
-  sync_out=$(gbrain sync --repo "$WORKTREE" 2>&1) || die "gbrain sync failed: $sync_out" 1
+  local sync_out sync_redacted
+  sync_out=$(gbrain sync --repo "$WORKTREE" 2>&1) || {
+    # Redact any postgres:// URLs from the error message in case gbrain logged
+    # a connection error containing the full DSN with password. The user sees
+    # "***REDACTED***" instead of credentials in their stderr or any log.
+    sync_redacted=$(echo "$sync_out" | tail -10 | sed -E 's#postgres(ql)?://[^[:space:]]+#postgres://***REDACTED***#g')
+    die "gbrain sync failed (last 10 lines, secrets redacted): $sync_redacted" 1
+  }
   echo "$sync_out" | tail -3 | prefix
 
   echo "source_id=$id"
@@ -289,7 +341,7 @@ do_uninstall() {
 
   if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
     git -C "$GSTACK_HOME" worktree remove --force "$WORKTREE" 2>/dev/null \
-      || rm -rf "$WORKTREE"
+      || safe_rm_worktree "$WORKTREE"
   fi
 
   # Cron-stub: future launchd plist (not created today; safety net for D9 future).
