@@ -38,6 +38,7 @@
     mount: document.getElementById('terminal-mount'),
     ended: document.getElementById('terminal-ended'),
     restart: document.getElementById('terminal-restart'),
+    restartNow: document.getElementById('terminal-restart-now'),
   };
 
   /** State machine. */
@@ -109,10 +110,12 @@
   }
 
   /**
-   * POST /pty-session to mint the HttpOnly cookie. Returns { terminalPort,
-   * expiresAt } on success, or null with reason on failure. Note: we do
-   * NOT receive the cookie value; it lives in the browser's HttpOnly jar
-   * and travels with the next same-origin request automatically.
+   * POST /pty-session to mint a fresh terminal session. Returns
+   * { terminalPort, ptySessionToken, expiresAt } on success, or
+   * { error } on failure. The token rides on the WebSocket
+   * Sec-WebSocket-Protocol header, which is the only auth header
+   * the browser WebSocket API lets us set. The token is NOT persisted —
+   * each sidebar load mints a fresh one and discards it on close.
    */
   async function mintSession() {
     const serverPort = getServerPort();
@@ -183,6 +186,22 @@
     });
   }
 
+  /**
+   * Inject a string into the live PTY (the same way a real keystroke would).
+   * Used by the toolbar's Cleanup button and the Inspector's "Send to Code"
+   * action so the user can drive claude from outside-the-keyboard surfaces.
+   * Returns true if the bytes went out, false if no live session.
+   */
+  window.gstackInjectToTerminal = function (text) {
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(new TextEncoder().encode(text));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   async function connect() {
     if (state !== STATE.IDLE) return; // already connecting/live
     setState(STATE.CONNECTING);
@@ -192,7 +211,11 @@
       setState(STATE.IDLE, { message: `Cannot start: ${minted.error}` });
       return;
     }
-    const { terminalPort } = minted;
+    const { terminalPort, ptySessionToken } = minted;
+    if (!ptySessionToken) {
+      setState(STATE.IDLE, { message: 'Cannot start: no session token returned' });
+      return;
+    }
 
     // Pre-flight: does claude even exist on PATH?
     const claudeStatus = await checkClaudeAvailable(terminalPort);
@@ -205,7 +228,12 @@
     setState(STATE.LIVE);
     fitAddon && fitAddon.fit();
 
-    ws = new WebSocket(`ws://127.0.0.1:${terminalPort}/ws`);
+    // Token rides on Sec-WebSocket-Protocol — the only auth header the
+    // browser WebSocket API lets us set. Cross-port HttpOnly cookies with
+    // SameSite=Strict don't survive the jump from server.ts:34567 to the
+    // agent's random port from a chrome-extension origin, so cookies
+    // alone weren't reliable.
+    ws = new WebSocket(`ws://127.0.0.1:${terminalPort}/ws`, [`gstack-pty.${ptySessionToken}`]);
     ws.binaryType = 'arraybuffer';
 
     ws.addEventListener('open', () => {
@@ -256,66 +284,101 @@
 
   // ─── Wiring ───────────────────────────────────────────────────
 
-  function init() {
-    // First-keystroke trigger on the bootstrap card.
-    document.addEventListener('keydown', onAnyKey, { once: false, capture: true });
+  /**
+   * Force a fresh session: close any open WS, dispose xterm, return to
+   * IDLE, kick off auto-connect. Safe to call from any state.
+   */
+  function forceRestart() {
+    try { ws && ws.close(); } catch {}
+    ws = null;
+    if (term) {
+      try { term.dispose(); } catch {}
+      term = null;
+      fitAddon = null;
+    }
+    setState(STATE.IDLE, { message: 'Starting Claude Code...' });
+    tryAutoConnect();
+  }
 
-    els.installRetry?.addEventListener('click', async () => {
-      // Re-probe and try connecting again.
-      const minted = await mintSession();
-      if (!minted.error) {
-        const claudeStatus = await checkClaudeAvailable(minted.terminalPort);
-        if (claudeStatus.available) {
-          setState(STATE.IDLE);
-          // Auto-trigger reconnect on next key
-        }
-      }
-    });
-
-    els.restart?.addEventListener('click', () => {
-      // Clean restart. Drop xterm state too — codex 1C: each session is fresh.
-      if (term) {
-        try { term.dispose(); } catch {}
-        term = null;
-        fitAddon = null;
-      }
-      setState(STATE.IDLE);
-    });
-
-    // Tab switching: tell the agent which browser tab is active so claude's
-    // active-tab.json stays in sync. sidepanel.js owns the active-tab state;
-    // we listen for its "tab activated" event.
-    document.addEventListener('gstack:active-tab-changed', (ev) => {
+  /**
+   * Repaint xterm when the Terminal pane becomes visible. xterm.js has a
+   * known issue where its renderer doesn't redraw after a display:none →
+   * display:flex flip — the canvas/DOM stays blank until something forces
+   * a layout pass. fit() recomputes dimensions, refresh() redraws.
+   */
+  function repaintIfLive() {
+    if (state !== STATE.LIVE || !term) return;
+    try { fitAddon && fitAddon.fit(); } catch {}
+    try { term.refresh(0, term.rows - 1); } catch {}
+    try {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({
-            type: 'tabSwitch',
-            tabId: ev.detail?.tabId,
-            url: ev.detail?.url,
-            title: ev.detail?.title,
-          }));
-        } catch {}
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       }
+    } catch {}
+  }
+
+  function init() {
+    setState(STATE.IDLE, { message: 'Starting Claude Code...' });
+
+    els.installRetry?.addEventListener('click', () => {
+      // Re-probe claude on PATH, then try a connect.
+      setState(STATE.IDLE, { message: 'Starting Claude Code...' });
+      tryAutoConnect();
     });
 
-    // Initial state
-    setState(STATE.IDLE);
+    // Two restart buttons:
+    //   - els.restart lives inside the ENDED state card (visible only after
+    //     a session has ended).
+    //   - els.restartNow lives in the always-visible toolbar (lets the user
+    //     force a fresh claude mid-session without waiting for it to exit).
+    els.restart?.addEventListener('click', forceRestart);
+    els.restartNow?.addEventListener('click', forceRestart);
+
+
+    // Repaint after a debug-tab → primary-pane transition. The debug
+    // tabs (Activity / Refs / Inspector) hide the Terminal pane via
+    // .tab-content { display: none }; xterm doesn't auto-redraw when its
+    // container flips back to visible, so we listen for the close-debug
+    // event and force a fit + refresh.
+    const observer = new MutationObserver(() => {
+      const term = document.getElementById('tab-terminal');
+      if (term?.classList.contains('active')) {
+        requestAnimationFrame(repaintIfLive);
+      }
+    });
+    const target = document.getElementById('tab-terminal');
+    if (target) observer.observe(target, { attributes: true, attributeFilter: ['class'] });
+
+    tryAutoConnect();
   }
 
-  function onAnyKey(ev) {
-    // Only trigger if Terminal pane is the active one and we're idle.
-    const terminalActive = document.getElementById('tab-terminal')?.classList.contains('active');
-    if (!terminalActive) return;
+  /**
+   * Eager-connect when the sidebar opens. Polls for sidepanel.js to populate
+   * window.gstackServerPort + window.gstackAuthToken (which it does as soon
+   * as /health succeeds), then fires connect() automatically. The user
+   * doesn't have to press a key — Terminal is the default tab and "tap to
+   * start" was a needless paper cut on every reload.
+   */
+  function tryAutoConnect() {
     if (state !== STATE.IDLE) return;
-    // Ignore pure modifier keys.
-    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(ev.key)) return;
-    connect();
+    let waited = 0;
+    const tick = () => {
+      // If the user navigated away (Chat tab) or already connected, drop out.
+      if (state !== STATE.IDLE) return;
+      if (getServerPort() && getAuthToken()) {
+        connect();
+        return;
+      }
+      waited += 200;
+      if (waited > 15000) {
+        setState(STATE.IDLE, { message: 'Browse server not ready. Reload sidebar to retry.' });
+        return;
+      }
+      setTimeout(tick, 200);
+    };
+    tick();
   }
 
-  // Wait for sidepanel.js to populate window.gstackServerPort + window.gstackAuthToken.
-  // sidepanel.js already polls /health and resolves the connection; we just need
-  // to wait for it. If those globals aren't available within 10s, surface a
-  // "browse server not ready" message — user can reload sidebar.
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

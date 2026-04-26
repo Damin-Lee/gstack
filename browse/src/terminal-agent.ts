@@ -200,10 +200,18 @@ function buildServer() {
 
       // /ws — WebSocket upgrade. CRITICAL gates:
       //   (1) Origin must be chrome-extension://<id>. Cross-site WS hijacking
-      //       defense per codex finding #9.
-      //   (2) Cookie gstack_pty must be in validTokens. The cookie was
-      //       minted by the parent server's /pty-session route under a
-      //       valid AUTH_TOKEN, so a request without it can't get a shell.
+      //       defense — required, not optional.
+      //   (2) Token must be in validTokens. We accept the token via two
+      //       transports for compatibility:
+      //         - Sec-WebSocket-Protocol (preferred for browsers — the only
+      //           auth header settable from the browser WebSocket API)
+      //         - Cookie gstack_pty (works for non-browser callers and
+      //           same-port browser callers; doesn't survive the cross-port
+      //           jump from server.ts:34567 to the agent's random port
+      //           when SameSite=Strict is set)
+      //       Either path works; both verify against the same in-memory
+      //       validTokens Set, populated by the parent server's
+      //       authenticated /pty-session → /internal/grant chain.
       if (url.pathname === '/ws') {
         const origin = req.headers.get('origin') || '';
         const isExtensionOrigin = origin.startsWith('chrome-extension://');
@@ -214,18 +222,48 @@ function buildServer() {
           return new Response('forbidden origin', { status: 403 });
         }
 
-        const cookieHeader = req.headers.get('cookie') || '';
-        let cookieToken: string | null = null;
-        for (const part of cookieHeader.split(';')) {
-          const [name, ...rest] = part.trim().split('=');
-          if (name === 'gstack_pty') { cookieToken = rest.join('=') || null; break; }
+        // Try Sec-WebSocket-Protocol first. Format: a single token, possibly
+        // with a `gstack-pty.` prefix (which we strip). Browsers send a
+        // comma-separated list when multiple were requested; we pick the
+        // first that matches a known token.
+        const protoHeader = req.headers.get('sec-websocket-protocol') || '';
+        let token: string | null = null;
+        let acceptedProtocol: string | null = null;
+        for (const raw of protoHeader.split(',').map(s => s.trim()).filter(Boolean)) {
+          const candidate = raw.startsWith('gstack-pty.') ? raw.slice('gstack-pty.'.length) : raw;
+          if (validTokens.has(candidate)) {
+            token = candidate;
+            acceptedProtocol = raw;
+            break;
+          }
         }
-        if (!cookieToken || !validTokens.has(cookieToken)) {
+
+        // Fallback: Cookie gstack_pty (legacy / non-browser callers).
+        if (!token) {
+          const cookieHeader = req.headers.get('cookie') || '';
+          for (const part of cookieHeader.split(';')) {
+            const [name, ...rest] = part.trim().split('=');
+            if (name === 'gstack_pty') {
+              const candidate = rest.join('=') || null;
+              if (candidate && validTokens.has(candidate)) {
+                token = candidate;
+              }
+              break;
+            }
+          }
+        }
+
+        if (!token) {
           return new Response('unauthorized', { status: 401 });
         }
 
         const upgraded = server.upgrade(req, {
-          data: { cookie: cookieToken },
+          data: { cookie: token },
+          // Echo the protocol back so the browser accepts the upgrade.
+          // Required when the client sends Sec-WebSocket-Protocol — the
+          // server MUST select one of the offered protocols, otherwise
+          // the browser closes the connection immediately.
+          ...(acceptedProtocol ? { headers: { 'Sec-WebSocket-Protocol': acceptedProtocol } } : {}),
         });
         return upgraded ? undefined : new Response('upgrade failed', { status: 500 });
       }

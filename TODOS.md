@@ -52,28 +52,6 @@ scope of that PR; deliberately deferred to keep PTY-import small.
 
 ---
 
-### v1.1+: Apply terminal-agent's exception handlers to sidebar-agent
-
-**What:** While reviewing cc-pty-import, codex noted that `sidebar-agent.ts`
-has no `process.on('uncaughtException'|'unhandledRejection')` handlers.
-A bug in claude stream parsing or queue I/O can take down the chat path
-silently. terminal-agent.ts ships with these handlers; sidebar-agent
-should get them too.
-
-**Why:** Today a single uncaught exception in chat = entire sidebar chat
-dies and nothing tells the user. The CLI doesn't supervise the agent.
-
-**Pros:** Chat survives transient bugs. **Cons:** Catching uncaught
-exceptions can hide real failures — pair the handlers with structured
-logging so we still see the bug.
-
-**Context:** codex finding #4 on cc-pty-import plan-eng review.
-
-**Priority:** P2.
-**Effort:** S.
-
----
-
 ## Testing
 
 ### Pre-existing test failures surfaced during v1.12.0.0 ship

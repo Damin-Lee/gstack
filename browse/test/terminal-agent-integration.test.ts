@@ -127,7 +127,7 @@ describe('terminal-agent: /ws gates', () => {
   });
 });
 
-describe('terminal-agent: PTY round-trip via real WebSocket', () => {
+describe('terminal-agent: PTY round-trip via real WebSocket (Cookie auth)', () => {
   test('binary writes go to PTY stdin, output streams back', async () => {
     const cookie = 'rt-token-must-be-at-least-seventeen-chars-long';
     const granted = await grantToken(cookie);
@@ -180,6 +180,65 @@ describe('terminal-agent: PTY round-trip via real WebSocket', () => {
     try { ws.close(); } catch {}
     // Give cleanup a moment.
     await Bun.sleep(200);
+  });
+
+  test('Sec-WebSocket-Protocol auth path: browser-style upgrade with token in protocol', async () => {
+    // This is the path the actual browser extension takes. Cross-port
+    // SameSite=Strict cookies don't reliably survive the jump from the
+    // browse server (port A) to the agent (port B) when initiated from a
+    // chrome-extension origin, so we send the token via the only auth
+    // header the browser WebSocket API lets us set: Sec-WebSocket-Protocol.
+    //
+    // The browser sends `gstack-pty.<token>` and the agent must:
+    //   1) strip the gstack-pty. prefix
+    //   2) validate the token
+    //   3) ECHO the protocol back in the upgrade response
+    // Without (3) the browser closes the connection immediately, which
+    // is the exact bug the original cookie-only implementation hit in
+    // manual dogfood. This test catches that regression in CI.
+    const token = 'sec-protocol-token-must-be-at-least-seventeen-chars';
+    await grantToken(token);
+
+    // We exercise the protocol path by raw-handshaking via fetch+Upgrade,
+    // because Bun's test-client WebSocket constructor doesn't propagate
+    // `protocols` cleanly when also passed `headers` (the constructor
+    // detects the third-arg form unreliably). Real browsers (Chromium)
+    // use the standard protocols arg fine — the server-side handler is
+    // identical either way, so this test still locks the load-bearing
+    // invariant: the agent accepts a token via Sec-WebSocket-Protocol
+    // and echoes the protocol back so a browser would accept the upgrade.
+    const handshakeKey = 'dGhlIHNhbXBsZSBub25jZQ==';
+    const resp = await fetch(`http://127.0.0.1:${agentPort}/ws`, {
+      headers: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': handshakeKey,
+        'Sec-WebSocket-Protocol': `gstack-pty.${token}`,
+        'Origin': 'chrome-extension://test-extension-id',
+      },
+    });
+
+    // 101 Switching Protocols + protocol echoed back = browser would accept.
+    // 401/403/anything else = browser would close the connection immediately
+    // (the bug we hit in manual dogfood).
+    expect(resp.status).toBe(101);
+    expect(resp.headers.get('upgrade')?.toLowerCase()).toBe('websocket');
+    expect(resp.headers.get('sec-websocket-protocol')).toBe(`gstack-pty.${token}`);
+  });
+
+  test('Sec-WebSocket-Protocol auth: rejects unknown token even with valid Origin', async () => {
+    const resp = await fetch(`http://127.0.0.1:${agentPort}/ws`, {
+      headers: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'Sec-WebSocket-Protocol': 'gstack-pty.never-granted-token',
+        'Origin': 'chrome-extension://test-extension-id',
+      },
+    });
+    expect(resp.status).toBe(401);
   });
 
   test('text frame {type:"resize"} is accepted (no crash, ws stays open)', async () => {

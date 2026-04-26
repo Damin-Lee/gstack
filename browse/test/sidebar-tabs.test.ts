@@ -1,26 +1,15 @@
 /**
- * Regression: changing the default sidebar tab to Terminal must NOT break
- * the existing Chat path or the debug-tab return-to logic.
+ * Regression: sidebar layout invariants after the chat-tab rip.
  *
- * Original /plan-eng-review Issue 3A asked for a Playwright + extension
- * E2E test. The codebase doesn't ship Playwright extension launcher
- * infrastructure (extension tests here are source-level), so this regression
- * is implemented as a structural assertion suite over the extension files.
- * That's enough to lock the load-bearing invariants:
+ * The Chrome side panel used to host two surfaces: Chat (one-shot
+ * `claude -p` queue) and Terminal (interactive PTY). Chat was ripped
+ * once the PTY proved out — sidebar-agent.ts is gone, the chat queue
+ * endpoints are gone, and the primary-tab nav (Terminal | Chat) is
+ * gone. Terminal is now the sole primary surface.
  *
- *   1. Terminal is the default-active primary tab.
- *   2. Chat exists as a non-active primary tab.
- *   3. The xterm assets are loaded.
- *   4. The debug-close path no longer hardcodes `tab-chat` (uses the
- *      activePrimaryPaneId helper that respects whichever primary tab
- *      the user has selected).
- *   5. Manifest declares the ws://127.0.0.1 host permission so MV3
- *      doesn't block the WebSocket upgrade.
- *   6. The chat surface (chat-messages, chat input wiring) still exists
- *      and was not accidentally deleted alongside the default-tab change.
- *
- * If a future refactor regresses any of these, this test fails BEFORE the
- * change ships.
+ * This file locks the load-bearing invariants of that layout so a
+ * future refactor can't silently re-introduce the old surface or break
+ * the new one.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -32,84 +21,220 @@ const JS = fs.readFileSync(path.join(import.meta.dir, '../../extension/sidepanel
 const TERM_JS = fs.readFileSync(path.join(import.meta.dir, '../../extension/sidepanel-terminal.js'), 'utf-8');
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(import.meta.dir, '../../extension/manifest.json'), 'utf-8'));
 
-describe('sidebar tabs regression: Terminal is default, Chat survives', () => {
-  test('primary tab bar declares Terminal and Chat with Terminal active', () => {
-    // Terminal is the active button.
-    expect(HTML).toMatch(/<button[^>]*class="primary-tab active"[^>]*data-pane="terminal"/);
-    // Chat is a primary tab, present and non-active.
-    expect(HTML).toMatch(/<button[^>]*class="primary-tab"[^>]*data-pane="chat"/);
+describe('sidebar: chat tab + nav are removed, Terminal is sole primary surface', () => {
+  test('No primary-tab nav element exists', () => {
+    expect(HTML).not.toContain('class="primary-tabs"');
+    expect(HTML).not.toContain('data-pane="chat"');
+    expect(HTML).not.toContain('data-pane="terminal"');
   });
 
-  test('Terminal pane is active and Chat pane is not active', () => {
-    // tab-terminal has the .active class on its <main>.
-    expect(HTML).toMatch(/<main id="tab-terminal" class="tab-content active"/);
-    // tab-chat is present but NOT active.
-    expect(HTML).toMatch(/<main id="tab-chat" class="tab-content"(?! active)/);
+  test('No <main id="tab-chat"> pane', () => {
+    expect(HTML).not.toMatch(/<main[^>]*id="tab-chat"/);
+    expect(HTML).not.toContain('id="chat-messages"');
+    expect(HTML).not.toContain('id="chat-loading"');
+    expect(HTML).not.toContain('id="chat-welcome"');
   });
 
-  test('xterm assets are loaded for the Terminal pane', () => {
-    expect(HTML).toContain('lib/xterm.css');
-    expect(HTML).toContain('lib/xterm.js');
-    expect(HTML).toContain('lib/xterm-addon-fit.js');
-    expect(HTML).toContain('sidepanel-terminal.js');
+  test('No chat input / send button / experimental banner', () => {
+    expect(HTML).not.toContain('class="command-bar"');
+    expect(HTML).not.toContain('id="command-input"');
+    expect(HTML).not.toContain('id="send-btn"');
+    expect(HTML).not.toContain('id="stop-agent-btn"');
+    expect(HTML).not.toContain('id="experimental-banner"');
   });
 
-  test('chat surface still exists (no accidental deletion)', () => {
-    // The chat input and chat-messages containers are load-bearing for the
-    // existing sidebar-agent flow. If the default-tab change accidentally
-    // removed them, this catches it before users do.
-    expect(HTML).toContain('id="chat-messages"');
-    expect(HTML).toContain('id="chat-loading"');
+  test('No clear-chat button in footer', () => {
+    expect(HTML).not.toContain('id="clear-chat"');
   });
 
-  test('debug-close path no longer hardcodes tab-chat', () => {
-    // Before the Terminal default flip, sidepanel.js had two literal
-    // `getElementById('tab-chat').classList.add('active')` calls inside the
-    // debug-close handlers. Both must now go through activePrimaryPaneId()
-    // so closing debug returns to whichever primary tab is selected.
-    expect(JS).toContain('function activePrimaryPaneId');
-    // Old hardcoded form is gone (don't ban the string everywhere — there
-    // are legitimate references elsewhere in the file).
-    const debugToggleBlock = JS.slice(
-      JS.indexOf("debugToggle.addEventListener('click'"),
-      JS.indexOf("closeDebug.addEventListener('click'"),
-    );
-    expect(debugToggleBlock).not.toContain("'tab-chat'");
-    expect(debugToggleBlock).toContain('activePrimaryPaneId');
+  test('Terminal pane is .active by default and has the toolbar', () => {
+    expect(HTML).toMatch(/<main[^>]*id="tab-terminal"[^>]*class="tab-content active"/);
+    expect(HTML).toContain('id="terminal-toolbar"');
+    expect(HTML).toContain('id="terminal-restart-now"');
   });
 
-  test('primary-tab click handler exists and toggles classes', () => {
-    expect(JS).toContain("querySelectorAll('.primary-tab')");
-    expect(JS).toContain('aria-selected');
+  test('Quick-actions buttons (Cleanup / Screenshot / Cookies) survive in the terminal toolbar', () => {
+    // Garry explicitly wanted these kept after the chat rip — they drive
+    // browser actions, not chat.
+    expect(HTML).toContain('id="chat-cleanup-btn"');
+    expect(HTML).toContain('id="chat-screenshot-btn"');
+    expect(HTML).toContain('id="chat-cookies-btn"');
+    // They live inside the terminal toolbar now (siblings of the Restart
+    // button), not as a separate strip below all panes.
+    const toolbarStart = HTML.indexOf('id="terminal-toolbar"');
+    const toolbarEnd = HTML.indexOf('</div>', toolbarStart);
+    const toolbarBlock = HTML.slice(toolbarStart, toolbarEnd + 6);
+    expect(toolbarBlock).toContain('id="chat-cleanup-btn"');
+    expect(toolbarBlock).toContain('id="chat-screenshot-btn"');
+    expect(toolbarBlock).toContain('id="chat-cookies-btn"');
   });
 });
 
-describe('sidebar terminal: lazy spawn + auth chain', () => {
-  test('terminal JS waits for first key to start (lazy-spawn)', () => {
-    expect(TERM_JS).toContain('function onAnyKey');
-    expect(TERM_JS).toContain('terminalActive');
-    expect(TERM_JS).toContain('connect()');
+describe('sidepanel.js: chat helpers ripped, terminal-injection helper survives', () => {
+  test('No primary-tab click handler', () => {
+    expect(JS).not.toContain("querySelectorAll('.primary-tab')");
+    expect(JS).not.toContain('activePrimaryPaneId');
   });
 
-  test('terminal JS does NOT auto-reconnect on close (codex finding #8)', () => {
-    // Close handler transitions to ENDED and shows a restart button,
-    // not a reconnect timer.
-    const closeBlock = TERM_JS.slice(TERM_JS.indexOf("addEventListener('close'"));
-    expect(closeBlock).toContain('ENDED');
-    // Forbid bare setTimeout(...connect... patterns inside this file's
-    // close handler — would indicate auto-reconnect crept back in.
-    expect(TERM_JS).not.toMatch(/close[\s\S]{0,200}setTimeout\([^)]*connect/);
+  test('No chat polling, sendMessage, sendChat, stopAgent, or pollTabs', () => {
+    expect(JS).not.toContain('chatPollInterval');
+    expect(JS).not.toContain('function sendMessage');
+    expect(JS).not.toContain('function pollChat');
+    expect(JS).not.toContain('function pollTabs');
+    expect(JS).not.toContain('function switchChatTab');
+    expect(JS).not.toContain('function stopAgent');
+    expect(JS).not.toContain('function applyChatEnabled');
+    expect(JS).not.toContain('function showSecurityBanner');
   });
 
-  test('terminal JS reaches /pty-session with the bootstrap auth token', () => {
-    expect(TERM_JS).toContain('/pty-session');
-    expect(TERM_JS).toContain('Bearer ${token}');
-    expect(TERM_JS).toContain('credentials');
+  test('Cleanup runs through the live PTY (no /sidebar-command POST)', () => {
+    // The new Cleanup handler injects the prompt straight into claude's
+    // PTY via gstackInjectToTerminal. The dead code path was a POST to
+    // /sidebar-command which kicked off a fresh claude -p subprocess.
+    const cleanup = JS.slice(JS.indexOf('async function runCleanup'));
+    expect(cleanup).toContain('window.gstackInjectToTerminal');
+    expect(cleanup).not.toContain('/sidebar-command');
+    expect(cleanup).not.toContain('addChatEntry');
   });
 
-  test('terminal JS opens ws://127.0.0.1 (not wss)', () => {
-    expect(TERM_JS).toContain('new WebSocket(`ws://127.0.0.1:');
-    // Origin is implicit (browser sets chrome-extension://<id>); no manual override.
+  test('Inspector "Send to Code" routes through the live PTY', () => {
+    const sendBtn = JS.slice(JS.indexOf('inspectorSendBtn.addEventListener'));
+    expect(sendBtn).toContain('window.gstackInjectToTerminal');
+    expect(sendBtn).not.toContain("type: 'sidebar-command'");
+  });
+
+  test('updateConnection no longer kicks off chat / tab polling', () => {
+    const update = JS.slice(JS.indexOf('function updateConnection'), JS.indexOf('function updateConnection') + 1500);
+    expect(update).not.toContain('chatPollInterval');
+    expect(update).not.toContain('tabPollInterval');
+    expect(update).not.toContain('pollChat');
+    expect(update).not.toContain('pollTabs');
+    // BUT must still expose the bootstrap globals for sidepanel-terminal.js.
+    expect(update).toContain('window.gstackServerPort');
+    expect(update).toContain('window.gstackAuthToken');
+  });
+});
+
+describe('sidepanel-terminal.js: eager auto-connect + injection API', () => {
+  test('Exposes window.gstackInjectToTerminal for cross-pane use', () => {
+    expect(TERM_JS).toContain('window.gstackInjectToTerminal');
+    // Returns false when no live session, true when bytes go out.
+    const inject = TERM_JS.slice(TERM_JS.indexOf('window.gstackInjectToTerminal'));
+    expect(inject).toContain('return false');
+    expect(inject).toContain('return true');
+    expect(inject).toContain('ws.readyState !== WebSocket.OPEN');
+  });
+
+  test('Auto-connects on init (no keypress required)', () => {
+    expect(TERM_JS).not.toContain('function onAnyKey');
+    expect(TERM_JS).not.toContain("addEventListener('keydown'");
+    expect(TERM_JS).toContain('function tryAutoConnect');
+  });
+
+  test('Repaint hook fires when Terminal pane becomes visible', () => {
+    // The chat-tab rip removed gstack:primary-tab-changed; we use a
+    // MutationObserver on #tab-terminal's class attr instead. The
+    // observer must call repaintIfLive when the .active class returns.
+    expect(TERM_JS).toContain('MutationObserver');
+    expect(TERM_JS).toContain("attributeFilter: ['class']");
+    expect(TERM_JS).toContain('repaintIfLive');
+    const repaint = TERM_JS.slice(TERM_JS.indexOf('function repaintIfLive'));
+    expect(repaint).toContain('fitAddon && fitAddon.fit()');
+    expect(repaint).toContain('term.refresh');
+    expect(repaint).toContain("type: 'resize'");
+  });
+
+  test('No auto-reconnect on close (Restart is user-initiated)', () => {
+    const closeOnly = TERM_JS.slice(
+      TERM_JS.indexOf("ws.addEventListener('close'"),
+      TERM_JS.indexOf("ws.addEventListener('error'"),
+    );
+    expect(closeOnly).not.toContain('setTimeout');
+    expect(closeOnly).not.toContain('tryAutoConnect');
+    expect(closeOnly).not.toContain('connect()');
+  });
+
+  test('forceRestart helper closes ws, disposes xterm, returns to IDLE', () => {
+    expect(TERM_JS).toContain('function forceRestart');
+    const fn = TERM_JS.slice(TERM_JS.indexOf('function forceRestart'));
+    expect(fn).toContain('ws && ws.close()');
+    expect(fn).toContain('term.dispose()');
+    expect(fn).toContain('STATE.IDLE');
+    expect(fn).toContain('tryAutoConnect()');
+  });
+
+  test('Both restart buttons (mid-session and ENDED) call forceRestart', () => {
+    expect(TERM_JS).toContain("els.restart?.addEventListener('click', forceRestart)");
+    expect(TERM_JS).toContain("els.restartNow?.addEventListener('click', forceRestart)");
+  });
+});
+
+describe('server.ts: chat / sidebar-agent endpoints are gone', () => {
+  const SERVER_SRC = fs.readFileSync(path.join(import.meta.dir, '../src/server.ts'), 'utf-8');
+
+  test('No /sidebar-command, /sidebar-chat, /sidebar-agent/* routes', () => {
+    expect(SERVER_SRC).not.toMatch(/url\.pathname === ['"]\/sidebar-command['"]/);
+    expect(SERVER_SRC).not.toMatch(/url\.pathname === ['"]\/sidebar-chat['"]/);
+    expect(SERVER_SRC).not.toMatch(/url\.pathname\.startsWith\(['"]\/sidebar-agent\//);
+    expect(SERVER_SRC).not.toMatch(/url\.pathname === ['"]\/sidebar-agent\/event['"]/);
+    expect(SERVER_SRC).not.toMatch(/url\.pathname === ['"]\/sidebar-tabs['"]/);
+    expect(SERVER_SRC).not.toMatch(/url\.pathname === ['"]\/sidebar-session['"]/);
+  });
+
+  test('No chat-related state declarations or helpers', () => {
+    // Allow the symbol names inside the rip-marker comments — but no
+    // `let`, `const`, `function`, or `interface` declarations of them.
+    expect(SERVER_SRC).not.toMatch(/^let agentProcess/m);
+    expect(SERVER_SRC).not.toMatch(/^let agentStatus/m);
+    expect(SERVER_SRC).not.toMatch(/^let messageQueue/m);
+    expect(SERVER_SRC).not.toMatch(/^let sidebarSession/m);
+    expect(SERVER_SRC).not.toMatch(/^const tabAgents/m);
+    expect(SERVER_SRC).not.toMatch(/^function pickSidebarModel/m);
+    expect(SERVER_SRC).not.toMatch(/^function processAgentEvent/m);
+    expect(SERVER_SRC).not.toMatch(/^function killAgent/m);
+    expect(SERVER_SRC).not.toMatch(/^function addChatEntry/m);
+    expect(SERVER_SRC).not.toMatch(/^interface ChatEntry/m);
+    expect(SERVER_SRC).not.toMatch(/^interface SidebarSession/m);
+  });
+
+  test('/health no longer surfaces agentStatus or messageQueue length', () => {
+    const health = SERVER_SRC.slice(SERVER_SRC.indexOf("url.pathname === '/health'"));
+    const slice = health.slice(0, 2000);
+    expect(slice).not.toContain('agentStatus');
+    expect(slice).not.toContain('messageQueue');
+    expect(slice).not.toContain('agentStartTime');
+    // chatEnabled is hardcoded false now (older clients still see the field).
+    expect(slice).toMatch(/chatEnabled:\s*false/);
+    // terminalPort survives.
+    expect(slice).toContain('terminalPort');
+  });
+});
+
+describe('cli.ts: sidebar-agent is no longer spawned', () => {
+  const CLI_SRC = fs.readFileSync(path.join(import.meta.dir, '../src/cli.ts'), 'utf-8');
+
+  test('No Bun.spawn of sidebar-agent.ts', () => {
+    expect(CLI_SRC).not.toMatch(/Bun\.spawn\(\s*\['bun',\s*'run',\s*\w*[Aa]gent[Ss]cript\][\s\S]{0,300}sidebar-agent/);
+    // The variable name `agentScript` was for sidebar-agent. After the
+    // rip there's only termAgentScript. Allow comments to mention the
+    // history but not active spawn calls.
+    expect(CLI_SRC).not.toMatch(/^\s*let agentScript = path\.resolve/m);
+  });
+
+  test('Terminal-agent spawn survives', () => {
+    expect(CLI_SRC).toContain('terminal-agent.ts');
+    expect(CLI_SRC).toMatch(/Bun\.spawn\(\['bun',\s*'run',\s*termAgentScript\]/);
+  });
+});
+
+describe('files: sidebar-agent.ts and its tests are deleted', () => {
+  test('browse/src/sidebar-agent.ts is gone', () => {
+    expect(fs.existsSync(path.join(import.meta.dir, '../src/sidebar-agent.ts'))).toBe(false);
+  });
+
+  test('sidebar-agent test files are gone', () => {
+    expect(fs.existsSync(path.join(import.meta.dir, 'sidebar-agent.test.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(import.meta.dir, 'sidebar-agent-roundtrip.test.ts'))).toBe(false);
   });
 });
 
@@ -123,8 +248,6 @@ describe('manifest: ws permission + xterm-safe CSP', () => {
   });
 
   test('manifest does NOT add unsafe-eval to extension_pages CSP', () => {
-    // xterm@5 is eval-free (verified at vendor time). If a future xterm
-    // upgrade requires unsafe-eval, this test fires and forces a decision.
     const csp = MANIFEST.content_security_policy;
     if (csp && csp.extension_pages) {
       expect(csp.extension_pages).not.toContain('unsafe-eval');

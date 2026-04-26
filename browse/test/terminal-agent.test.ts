@@ -122,10 +122,24 @@ describe('Source-level guard: terminal-agent', () => {
     expect(wsHandler).toContain('forbidden origin');
   });
 
-  test('validates gstack_pty cookie against an in-memory token set', () => {
+  test('validates the session token against an in-memory token set', () => {
     const wsHandler = AGENT_SRC.slice(AGENT_SRC.indexOf("if (url.pathname === '/ws')"));
+    // Two transports: Sec-WebSocket-Protocol (preferred for browsers) and
+    // Cookie gstack_pty (fallback). Both verify against validTokens.
+    expect(wsHandler).toContain('sec-websocket-protocol');
     expect(wsHandler).toContain('gstack_pty');
     expect(wsHandler).toContain('validTokens.has');
+  });
+
+  test('Sec-WebSocket-Protocol auth: strips gstack-pty. prefix and echoes back', () => {
+    const wsHandler = AGENT_SRC.slice(AGENT_SRC.indexOf("if (url.pathname === '/ws')"));
+    // Browsers send `Sec-WebSocket-Protocol: gstack-pty.<token>`. The agent
+    // must strip the prefix before checking validTokens, AND echo the
+    // protocol back in the upgrade response — without the echo, the
+    // browser closes the connection immediately.
+    expect(wsHandler).toContain("'gstack-pty.'");
+    expect(wsHandler).toContain('Sec-WebSocket-Protocol');
+    expect(wsHandler).toContain('acceptedProtocol');
   });
 
   test('lazy spawn: claude PTY is spawned in message handler, not on upgrade', () => {
@@ -158,14 +172,19 @@ describe('Source-level guard: terminal-agent', () => {
 });
 
 describe('Source-level guard: server.ts /pty-session route', () => {
-  test('validates AUTH_TOKEN and uses cookie-based grant', () => {
+  test('validates AUTH_TOKEN, grants over loopback, returns token + Set-Cookie', () => {
     const route = SERVER_SRC.slice(SERVER_SRC.indexOf("url.pathname === '/pty-session'"));
     // Must check auth before minting.
     const beforeMint = route.slice(0, route.indexOf('mintPtySessionToken'));
     expect(beforeMint).toContain('validateAuth');
-    // Must call the loopback grant before responding.
+    // Must call the loopback grant before responding (otherwise the
+    // agent's validTokens Set never sees the token and /ws would 401).
     expect(route).toContain('grantPtyToken');
-    // Must Set-Cookie with the minted token.
+    // Must return the token in the JSON body for the
+    // Sec-WebSocket-Protocol auth path (cross-port cookies don't survive
+    // SameSite=Strict from a chrome-extension origin).
+    expect(route).toContain('ptySessionToken');
+    // Set-Cookie is kept as a fallback for non-browser callers.
     expect(route).toContain('Set-Cookie');
     expect(route).toContain('buildPtySetCookie');
   });
