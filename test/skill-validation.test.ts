@@ -1623,7 +1623,14 @@ describe('no compiled binaries in git', () => {
   test('git tracks no files larger than 2MB', () => {
     // Pure fs.statSync — no shell spawn per file.
     const MAX_BYTES = 2 * 1024 * 1024;
+    // Exempt fixtures that are deliberately tracked at large size (security
+    // benchmark replay data). Add additions to this list with a justification
+    // in the test review trail.
+    const LARGE_FIXTURE_EXEMPTIONS = new Set([
+      'browse/test/fixtures/security-bench-haiku-responses.json',
+    ]);
     const oversized = trackedFiles.filter((f: string) => {
+      if (LARGE_FIXTURE_EXEMPTIONS.has(f)) return false;
       const full = path.join(ROOT, f);
       try {
         return fs.statSync(full).size > MAX_BYTES;
