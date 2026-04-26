@@ -8,7 +8,9 @@
 #
 # Usage:
 #   gstack-gbrain-source-wireup [--strict] [--source-id <id>] [--no-pull]
+#                               [--database-url <url>]
 #   gstack-gbrain-source-wireup --uninstall [--source-id <id>]
+#                               [--database-url <url>]
 #   gstack-gbrain-source-wireup --probe
 #   gstack-gbrain-source-wireup --help
 #
@@ -25,6 +27,14 @@
 #   GSTACK_BRAIN_NO_SYNC — skip the gbrain sync step (tests; helper still
 #                          ensures source registration)
 #
+# Defense against external rewrites of ~/.gbrain/config.json:
+# At helper startup we capture the database URL ONCE — from --database-url,
+# from GBRAIN_DATABASE_URL/DATABASE_URL env, or from ~/.gbrain/config.json —
+# and export it as GBRAIN_DATABASE_URL for every child `gbrain` invocation.
+# That env var overrides whatever's in config.json (per gbrain's loadConfig
+# at src/core/config.ts:53), so a process that flips config.json mid-sync
+# can't redirect us at a different brain mid-stream.
+#
 # Depends on: jq (transitive via gstack-gbrain-detect).
 
 set -euo pipefail
@@ -36,24 +46,53 @@ GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
 WORKTREE="${GSTACK_BRAIN_WORKTREE:-$HOME/.gstack-brain-worktree}"
 REMOTE_FILE="$HOME/.gstack-brain-remote.txt"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.gstack.brain-sync.plist"
+GBRAIN_CONFIG="$HOME/.gbrain/config.json"
 
 # ---- arg parse ----
 MODE="wireup"
 STRICT=0
 NO_PULL=0
 SOURCE_ID=""
+DATABASE_URL_ARG=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --uninstall)   MODE="uninstall"; shift ;;
-    --probe)       MODE="probe"; shift ;;
-    --strict)      STRICT=1; shift ;;
-    --no-pull)     NO_PULL=1; shift ;;
-    --source-id)   SOURCE_ID="$2"; shift 2 ;;
-    --help|-h)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)             echo "Unknown flag: $1" >&2; exit 1 ;;
+    --uninstall)     MODE="uninstall"; shift ;;
+    --probe)         MODE="probe"; shift ;;
+    --strict)        STRICT=1; shift ;;
+    --no-pull)       NO_PULL=1; shift ;;
+    --source-id)     SOURCE_ID="$2"; shift 2 ;;
+    --database-url)  DATABASE_URL_ARG="$2"; shift 2 ;;
+    --help|-h)       sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)               echo "Unknown flag: $1" >&2; exit 1 ;;
   esac
 done
+
+# ---- lock the database URL at startup ----
+# Precedence: --database-url flag > existing GBRAIN_DATABASE_URL/DATABASE_URL
+# env > read once from ~/.gbrain/config.json. Whichever wins gets exported as
+# GBRAIN_DATABASE_URL so every child `gbrain` invocation uses THAT brain even
+# if config.json is rewritten by another process during the wireup.
+_locked_url=""
+if [ -n "$DATABASE_URL_ARG" ]; then
+  _locked_url="$DATABASE_URL_ARG"
+elif [ -n "${GBRAIN_DATABASE_URL:-}" ]; then
+  _locked_url="$GBRAIN_DATABASE_URL"
+elif [ -n "${DATABASE_URL:-}" ]; then
+  _locked_url="$DATABASE_URL"
+elif [ -f "$GBRAIN_CONFIG" ]; then
+  _locked_url=$(python3 -c "
+import json, os, sys
+try:
+    c = json.load(open(os.path.expanduser('~/.gbrain/config.json')))
+    print(c.get('database_url',''))
+except Exception:
+    pass
+" 2>/dev/null)
+fi
+if [ -n "$_locked_url" ]; then
+  export GBRAIN_DATABASE_URL="$_locked_url"
+fi
 
 prefix() { sed 's/^/gstack-gbrain-source-wireup: /' >&2; }
 warn()   { echo "$*" | prefix; }

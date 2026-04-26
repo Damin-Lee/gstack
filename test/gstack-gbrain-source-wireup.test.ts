@@ -42,7 +42,12 @@ function makeFakeGbrain(opts: {
   const script = `#!/bin/bash
 LOG="${gbrainCallLog}"
 STATE="${gbrainStateFile}"
-echo "gbrain $@" >> "$LOG"
+# Record the call AND any GBRAIN_DATABASE_URL that the parent passed via env.
+# Format: "gbrain <args> [GBRAIN_DATABASE_URL=<url>]" so tests can assert
+# the wireup helper exported the locked URL into our env.
+LINE="gbrain $@"
+[ -n "\${GBRAIN_DATABASE_URL:-}" ] && LINE="\$LINE [GBRAIN_DATABASE_URL=\$GBRAIN_DATABASE_URL]"
+echo "\$LINE" >> "$LOG"
 
 # --version
 if [ "$1" = "--version" ]; then
@@ -283,6 +288,74 @@ describe('gstack-gbrain-source-wireup — wireup mode', () => {
     const r = run([]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('sync failed');
+  });
+});
+
+describe('gstack-gbrain-source-wireup — --database-url lock (defends against external config rewrites)', () => {
+  test('--database-url flag is exported as GBRAIN_DATABASE_URL to child gbrain calls', () => {
+    setupGstackRepo('git@github.com:user/gstack-brain-user.git');
+    makeFakeGbrain({});
+    const TARGET = 'postgresql://postgres.abc:pw@aws.pooler.supabase.com:5432/postgres';
+    const r = run(['--database-url', TARGET], { env: { GSTACK_BRAIN_NO_SYNC: '1' } });
+    expect(r.status).toBe(0);
+    const calls = gbrainCalls();
+    // every gbrain invocation should carry the locked URL
+    const writingCalls = calls.filter((c) => c.includes('sources') || c.includes('sync'));
+    expect(writingCalls.length).toBeGreaterThan(0);
+    for (const c of writingCalls) {
+      expect(c).toContain(`[GBRAIN_DATABASE_URL=${TARGET}]`);
+    }
+  });
+
+  test('falls back to ~/.gbrain/config.json database_url when no flag and no env', () => {
+    setupGstackRepo('git@github.com:user/gstack-brain-user.git');
+    makeFakeGbrain({});
+    const FILE_URL = 'postgresql://postgres.xyz:pw@aws.pooler.supabase.com:5432/postgres';
+    fs.mkdirSync(path.join(tmpHome, '.gbrain'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.gbrain', 'config.json'),
+      JSON.stringify({ engine: 'postgres', database_url: FILE_URL })
+    );
+    // Important: don't pass GBRAIN_DATABASE_URL or DATABASE_URL in env; helper
+    // should read from $HOME/.gbrain/config.json (HOME is tmpHome here).
+    const r = run([], {
+      env: {
+        GSTACK_BRAIN_NO_SYNC: '1',
+        GBRAIN_DATABASE_URL: '',
+        DATABASE_URL: '',
+      },
+    });
+    expect(r.status).toBe(0);
+    const calls = gbrainCalls();
+    const writingCalls = calls.filter((c) => c.includes('sources add'));
+    expect(writingCalls.length).toBe(1);
+    expect(writingCalls[0]).toContain(`[GBRAIN_DATABASE_URL=${FILE_URL}]`);
+  });
+
+  test('--database-url overrides env GBRAIN_DATABASE_URL and config.json', () => {
+    setupGstackRepo('git@github.com:user/gstack-brain-user.git');
+    makeFakeGbrain({});
+    const FLAG_URL = 'postgresql://postgres.flag:pw@a.b:5432/postgres';
+    const ENV_URL = 'postgresql://postgres.env:pw@x.y:5432/postgres';
+    const FILE_URL = 'postgresql://postgres.file:pw@p.q:5432/postgres';
+    fs.mkdirSync(path.join(tmpHome, '.gbrain'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.gbrain', 'config.json'),
+      JSON.stringify({ engine: 'postgres', database_url: FILE_URL })
+    );
+    const r = run(['--database-url', FLAG_URL], {
+      env: {
+        GSTACK_BRAIN_NO_SYNC: '1',
+        GBRAIN_DATABASE_URL: ENV_URL,
+      },
+    });
+    expect(r.status).toBe(0);
+    const calls = gbrainCalls();
+    const writingCalls = calls.filter((c) => c.includes('sources add'));
+    expect(writingCalls.length).toBe(1);
+    expect(writingCalls[0]).toContain(`[GBRAIN_DATABASE_URL=${FLAG_URL}]`);
+    expect(writingCalls[0]).not.toContain(ENV_URL);
+    expect(writingCalls[0]).not.toContain(FILE_URL);
   });
 });
 
