@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.13.1.0] - 2026-04-25
+
+## **Skill prompts get a 25% haircut. Plan-mode E2E tests work for the first time ever.**
+
+Two pieces of work in one release. First, every preamble resolver got compressed: 18 resolvers (Voice, Writing Style, AskUserQuestion Format, Completeness Principle, Plan Mode Info, Brain Sync, Routing Injection, and 11 more) lost a third of their prose without losing a single semantic rule. The full corpus of generated `SKILL.md` files dropped from 3.08 MB to 2.30 MB across 47 outputs. Second, the 5 plan-mode E2E tests added in v1.11.1.0 and rewritten in v1.12.1.0 turned out to have never actually passed. The SDK harness they used couldn't observe Claude's plan-mode confirmation UI, so `result.askUserQuestions.length` was always 0. They fail on `origin/main`. They fail on v1.0.0.0. This release ships a real-PTY harness that drives the actual `claude` binary, watches the rendered terminal, and gets all 5 to green.
+
+### The numbers that matter
+
+Token-level reduction comes from regenerating every `SKILL.md` against the slim resolvers (`bun run gen:skill-docs --host all`). Plan-mode E2E numbers come from `EVALS=1 EVALS_TIER=gate bun test test/skill-e2e-plan-*-plan-mode.test.ts` on a clean working tree.
+
+| Metric | Before | After | Δ |
+|---|---|---|---|
+| Total `SKILL.md` corpus | 3.08 MB | 2.30 MB | **−784 KB (−25.5%)** |
+| Approximate tokens | ~770K | ~574K | **−196K** |
+| `plan-ceo-review` preamble | 54 KB | 31 KB | −43% |
+| Plan-mode E2E tests passing | 0/5 | 5/5 | +5 |
+| Plan-mode E2E wall time | ∞ (never green) | 790 s (sequential) | proven |
+
+| Skill class | Old preamble | New preamble | Δ |
+|---|---|---|---|
+| Tier-2+ review skills | ~50 KB | ~30 KB | −40% |
+| Tier-1 quick skills | ~12 KB | ~9 KB | −25% |
+
+The biggest wins are the tier-≥3 plan reviews that load full preamble surface (Brain Sync, Context Recovery, Routing Injection): they keep all the load-bearing functionality and lose almost half the bytes. Every gstack invocation is now ~50K tokens lighter.
+
+### What this means for builders
+
+Faster every-skill startup, cheaper prompt-cache pricing on cold reads, more headroom inside the 200K context window for actual work. And for anyone who tried `/plan-ceo-review` in plan mode and watched it silently write a plan file: those tests now actually verify that doesn't happen. Run `bun run gen:skill-docs --host all` after pulling. The 5 plan-mode tests will run in CI on the next gate-tier eval pass.
+
+### Itemized changes
+
+#### Added
+
+- `test/helpers/claude-pty-runner.ts`: real-PTY test harness using `Bun.spawn({terminal:})` (Bun 1.3.10+ has built-in PTY — no `node-pty`, no native modules). Exposes `launchClaudePty()` for raw session control and `runPlanSkillObservation()` as the high-level contract for plan-mode skill tests.
+- Auto-handling of the workspace-trust dialog so tests run in temp directories without manual intervention.
+- Outcome contract: `asked` | `plan_ready` | `silent_write` | `exited` | `timeout`. Tests pass on `asked` or `plan_ready`, fail on the rest.
+
+#### Changed
+
+- 18 preamble resolvers compressed: `generate-ask-user-format.ts`, `generate-brain-sync-block.ts`, `generate-completeness-section.ts`, `generate-completion-status.ts`, `generate-confusion-protocol.ts`, `generate-context-health.ts`, `generate-context-recovery.ts`, `generate-continuous-checkpoint.ts`, `generate-lake-intro.ts`, `generate-preamble-bash.ts`, `generate-proactive-prompt.ts`, `generate-routing-injection.ts`, `generate-telemetry-prompt.ts`, `generate-upgrade-check.ts`, `generate-vendoring-deprecation.ts`, `generate-voice-directive.ts`, `generate-writing-style-migration.ts`, `generate-writing-style.ts`.
+- All 47 generated `SKILL.md` files regenerated; 3 ship golden fixtures regenerated.
+- Plan-* skills retain full preamble surface (Brain Sync, Context Recovery, Routing Injection) — the early slim attempt that cut these was reverted after diagnosing them as load-bearing.
+- 5 plan-mode E2E tests rewritten on the new harness with a 300s observation budget.
+
+#### Fixed
+
+- The 5 plan-mode E2E tests (`plan-ceo-plan-mode`, `plan-eng-plan-mode`, `plan-design-plan-mode`, `plan-devex-plan-mode`, `plan-mode-no-op`) finally pass. Verified clean: 5/5 in 790s sequential, against the real `claude` binary in a real PTY.
+- `scripts/skill-check.ts`: new `isRepoRootSymlink()` helper so dev installs that mount the repo root at `host/skills/gstack` (e.g., codex's `.agents/skills/gstack`) get skipped instead of double-counted.
+- `test/skill-validation.test.ts`: known-large-fixture exemption keeps `browse/test/fixtures/security-bench-haiku-responses.json` (27 MB BrowseSafe-Bench replay fixture, intentional) out of the size warning.
+
+#### Removed
+
+- `test/helpers/plan-mode-helpers.ts`: SDK-based harness with the `runPlanModeSkillTest` API that never worked. Zero callers remained after the rewrite.
+
+#### For contributors
+
+- `test/helpers/touchfiles.ts`: 5 plan-mode test selections + e2e-harness-audit selection now point at `claude-pty-runner.ts` instead of the deleted helper.
+- `test/e2e-harness-audit.test.ts`: recognizes `runPlanSkillObservation` as a valid coverage path alongside the legacy `canUseTool` / `runPlanModeSkillTest` patterns.
+- New unit test: `test/gen-skill-docs.test.ts` asserts plan-review preambles stay under 33 KB and the slim Voice section preserves its load-bearing semantic contract (lead-with-the-point, name-the-file, user-outcome framing, no-corporate, no-AI-vocab, user-sovereignty).
+
 ## [1.13.0.0] - 2026-04-25
 
 ## **`/gstack-claude` gives non-Claude hosts a read-only outside voice.**

@@ -1,9 +1,5 @@
 {{INHERIT:claude}}
 
-**Fan out explicitly.** When the task has independent files, claims, or review
-angles, launch parallel reads/checks before synthesizing. Keep the fan-out bounded
-and merge results before deciding.
-
 **Effort-match the step.** Simple file reads, config checks, command lookups, and
 mechanical edits don't need deep reasoning. Complete them quickly and move on. Reserve
 extended thinking for genuinely hard subproblems: architectural tradeoffs, subtle bugs,
