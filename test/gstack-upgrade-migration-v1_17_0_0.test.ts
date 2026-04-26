@@ -1,5 +1,5 @@
 /**
- * gstack-upgrade/migrations/v1.16.1.0.sh — migration script unit tests.
+ * gstack-upgrade/migrations/v1.17.0.0.sh — migration script unit tests.
  *
  * The migration runs on /gstack-upgrade for users with brain-sync configured but
  * never wired up to gbrain. It has 4 skip conditions and one happy path.
@@ -16,7 +16,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 
 const ROOT = path.resolve(import.meta.dir, '..');
-const MIGRATION = path.join(ROOT, 'gstack-upgrade', 'migrations', 'v1.16.1.0.sh');
+const MIGRATION = path.join(ROOT, 'gstack-upgrade', 'migrations', 'v1.17.0.0.sh');
 
 let tmpHome: string;
 let fakeBinDir: string;
@@ -85,7 +85,7 @@ afterEach(() => {
   } catch {}
 });
 
-describe('migrations/v1.16.1.0.sh', () => {
+describe('migrations/v1.17.0.0.sh', () => {
   test('HOME unset: prints message + exit 0 (defensive)', () => {
     // Override HOME to empty string. Bash's [ -z "${HOME:-}" ] guard should fire.
     const r = run({ env: { HOME: '' } });

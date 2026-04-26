@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Migration: v1.16.1.0 — Wire existing brain-sync repos as gbrain federated sources
+# Migration: v1.17.0.0 — Wire existing brain-sync repos as gbrain federated sources
 #
-# Pre-1.16.1.0 /setup-gbrain wrote ~/.gstack/consumers.json with a placeholder
+# Pre-1.17.0.0 /setup-gbrain wrote ~/.gstack/consumers.json with a placeholder
 # `status: "pending"` and an empty `ingest_url`, expecting a gbrain HTTP
 # /ingest-repo endpoint that never shipped. This migration runs the real
 # wireup (gbrain sources add + worktree + initial sync) for users who
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 if [ -z "${HOME:-}" ]; then
-  echo "  [v1.16.1.0] HOME is unset or empty — skipping migration." >&2
+  echo "  [v1.17.0.0] HOME is unset or empty — skipping migration." >&2
   exit 0
 fi
 
@@ -44,13 +44,13 @@ fi
 
 # Skip if helper missing (defensive — should always be present post-upgrade).
 if [ ! -x "$WIREUP_BIN" ]; then
-  echo "  [v1.16.1.0] $WIREUP_BIN missing or non-executable — skipping wireup." >&2
+  echo "  [v1.17.0.0] $WIREUP_BIN missing or non-executable — skipping wireup." >&2
   exit 0
 fi
 
-echo "  [v1.16.1.0] Wiring brain-sync repo into gbrain (federated source + initial sync)..."
+echo "  [v1.17.0.0] Wiring brain-sync repo into gbrain (federated source + initial sync)..."
 
 # No --strict: missing/old gbrain is a benign skip during a batch upgrade.
 "$WIREUP_BIN" || {
-  echo "  [v1.16.1.0] Wireup exited non-zero — re-run manually with: $WIREUP_BIN" >&2
+  echo "  [v1.17.0.0] Wireup exited non-zero — re-run manually with: $WIREUP_BIN" >&2
 }

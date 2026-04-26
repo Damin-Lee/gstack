@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.16.1.0] - 2026-04-26
+## [1.17.0.0] - 2026-04-26
 
 ## **Your gstack memory now actually lives in gbrain.**
 
@@ -27,7 +27,7 @@ The helper locks the database URL at startup (precedence: `--database-url` flag 
 
 `/setup-gbrain` Step 7 now invokes the helper with `--strict` after `gstack-brain-init`. `/gstack-upgrade` invokes the helper without `--strict` via `gstack-upgrade/migrations/v1.12.3.0.sh` so missing/old gbrain is a benign skip during batch upgrade. `bin/gstack-brain-restore` invokes the helper after the initial clone so a 2nd Mac gets the wireup automatically. `bin/gstack-brain-uninstall` invokes `--uninstall` plus removes legacy `consumers.json`.
 
-`bin/gstack-brain-init` drops 60 lines of dead consumer-registration code (the HTTP POST block, the `consumers.json` writer, the chore commit). `bin/gstack-brain-restore` drops the 18-line `consumers.json` token-rehydration block (the only consumer that used it never had real tokens). `bin/gstack-brain-consumer` is marked deprecated in its header docstring; removal in v1.17.0.0 after one cycle of grace.
+`bin/gstack-brain-init` drops 60 lines of dead consumer-registration code (the HTTP POST block, the `consumers.json` writer, the chore commit). `bin/gstack-brain-restore` drops the 18-line `consumers.json` token-rehydration block (the only consumer that used it never had real tokens). `bin/gstack-brain-consumer` is marked deprecated in its header docstring; removal in v1.18.0.0 after one cycle of grace.
 
 `test/gstack-gbrain-source-wireup.test.ts` is new: 13 unit tests with a fake `gbrain` binary on `$PATH` covering fresh-state registration, idempotent re-runs, drift recovery (gbrain has no `sources update`, only `remove + add`), `--strict` failure modes, source-id fallback chain (`.git` → remote-file → flag), `--probe` non-mutation, sync errors, and `--uninstall`.
 
@@ -35,7 +35,7 @@ The helper locks the database URL at startup (precedence: `--database-url` flag 
 
 These are reproducible on any machine after upgrade. Run the verify commands above to see your own delta.
 
-| Metric | Before (v1.16.0.0) | After (v1.16.1.0) |
+| Metric | Before (v1.16.0.0) | After (v1.17.0.0) |
 |---|---|---|
 | `gbrain sources list` size | 1 (default `/data/brain`) | 2 (default + `gstack-brain-{user}`) |
 | `consumers.json` status | `"pending"`, ingest_url `""` | file deleted from new installs |
@@ -51,8 +51,8 @@ Your gstack memory is searchable now. Run a CEO plan review or office-hours sess
 
 ### For contributors
 
-- `bin/gstack-brain-consumer` is deprecated in this release; removal in v1.17.0.0.
-- The `gbrain_url` and `gbrain_token` config keys are now no-ops. They remain readable for one cycle for back-compat, removed in v1.17.0.0.
+- `bin/gstack-brain-consumer` is deprecated in this release; removal in v1.18.0.0.
+- The `gbrain_url` and `gbrain_token` config keys are now no-ops. They remain readable for one cycle for back-compat, removed in v1.18.0.0.
 - Three pre-existing test failures on this branch (`gstack-config gbrain keys > GSTACK_HOME overrides real config dir`, `no compiled binaries in git > git tracks no files larger than 2MB`, `Opus 4.7 overlay — pacing directive`) were verified to fail on the base branch too. Out of scope for this PR; flagged for a follow-up.
 
 ## [1.15.0.0] - 2026-04-26

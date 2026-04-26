@@ -129,7 +129,7 @@ if [ -x "$WIREUP_BIN" ]; then
   "$WIREUP_BIN" --uninstall 2>/dev/null || true
 fi
 
-# ---- legacy consumers.json (no longer written by gstack-brain-init since v1.16.1.0) ----
+# ---- legacy consumers.json (no longer written by gstack-brain-init since v1.17.0.0) ----
 rm -f "$GSTACK_HOME/consumers.json" 2>/dev/null || true
 
 # ---- clear config keys ----
