@@ -43,6 +43,7 @@ export const META_COMMANDS = new Set([
   'frame',
   'ux-audit',
   'domain-skill',
+  'skill',
   'cdp',
 ]);
 
@@ -177,6 +178,8 @@ export const COMMAND_DESCRIPTIONS: Record<string, { category: string; descriptio
   'ux-audit': { category: 'Inspection', description: 'Extract page structure for UX behavioral analysis — site ID, nav, headings, text blocks, interactive elements. Returns JSON for agent interpretation.', usage: 'ux-audit' },
   // Domain skills (per-site notes the agent writes for itself)
   'domain-skill': { category: 'Meta', description: 'Per-site notes (host derived from active tab). Quarantined → active after N=3 uses without classifier flag → global by explicit promote.', usage: 'domain-skill save|list|show|edit|promote-to-global|rollback|rm <host?>' },
+  // Browser-skills (hand-written or generated Playwright scripts the runtime spawns)
+  'skill':        { category: 'Meta', description: 'Run a browser-skill: deterministic Playwright script that drives the daemon over loopback HTTP. 3-tier lookup (project > global > bundled). Spawned scripts get a per-spawn scoped token (read+write only) — never the daemon root token.', usage: 'skill list|show|run|test|rm <name?> [--arg k=v]... [--timeout=Ns]' },
   // CDP escape hatch (deny-default; see browse/src/cdp-allowlist.ts)
   'cdp':          { category: 'Inspection', description: 'Raw CDP method dispatch (deny-default; allowlist in cdp-allowlist.ts). Output through UNTRUSTED envelope when method is data-exfil.', usage: 'cdp <Domain.method> [json-params]' },
 };

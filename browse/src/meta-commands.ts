@@ -7,6 +7,7 @@ import { handleSnapshot } from './snapshot';
 import { getCleanText } from './read-commands';
 import { READ_COMMANDS, WRITE_COMMANDS, META_COMMANDS, PAGE_CONTENT_COMMANDS, wrapUntrustedContent, canonicalizeCommand } from './commands';
 import { handleDomainSkillCommand } from './domain-skill-commands';
+import { handleSkillCommand } from './browser-skill-commands';
 import { validateNavigationUrl } from './url-validation';
 import { checkScope, type TokenInfo } from './token-registry';
 import { validateOutputPath, validateReadPath, SAFE_DIRECTORIES, escapeRegExp } from './path-security';
@@ -235,6 +236,8 @@ export interface MetaCommandOpts {
   chainDepth?: number;
   /** Callback to route subcommands through the full security pipeline (handleCommandInternal) */
   executeCommand?: (body: { command: string; args?: string[]; tabId?: number }, tokenInfo?: TokenInfo | null) => Promise<{ status: number; result: string; json?: boolean }>;
+  /** The port the daemon is listening on (needed by `$B skill run` to point spawned scripts at the daemon). */
+  daemonPort?: number;
 }
 
 export async function handleMetaCommand(
@@ -1022,6 +1025,14 @@ export async function handleMetaCommand(
 
     case 'domain-skill': {
       return await handleDomainSkillCommand(args, bm);
+    }
+
+    case 'skill': {
+      const port = opts?.daemonPort;
+      if (port === undefined) {
+        throw new Error('skill command requires daemonPort in MetaCommandOpts (server bug)');
+      }
+      return await handleSkillCommand(args, { port });
     }
 
     case 'cdp': {
