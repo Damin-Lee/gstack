@@ -101,6 +101,45 @@ function writeClaudeAvailable(): void {
   }
 }
 
+/**
+ * System-prompt hint passed to claude via --append-system-prompt. Tells
+ * claude what tab-awareness affordances exist in this session so it
+ * doesn't have to discover them by trial. The user can override anything
+ * here just by saying so — system prompt is a soft hint, not a contract.
+ *
+ * Two paths claude has:
+ *   1. Read live state from <stateDir>/tabs.json + active-tab.json
+ *      (updated continuously by the gstack browser extension).
+ *   2. Run $B tab, $B tabs, $B tab-each <command> to act on tabs. The
+ *      tab-each helper fans a single command across every open tab and
+ *      returns per-tab results as JSON.
+ */
+function buildTabAwarenessHint(stateDir: string): string {
+  const tabsFile = path.join(stateDir, 'tabs.json');
+  const activeFile = path.join(stateDir, 'active-tab.json');
+  return [
+    'You are running inside the gstack browser sidebar with live access to the user\'s browser tabs.',
+    '',
+    'Tab state files (kept fresh automatically by the extension):',
+    `  ${tabsFile}        — all open tabs (id, url, title, active, pinned)`,
+    `  ${activeFile}    — the currently active tab`,
+    'Read these any time the user asks about "tabs", "the current page", or anything multi-tab. Do NOT shell out to $B tabs just to learn what\'s open — read the file.',
+    '',
+    'Tab manipulation commands (via $B):',
+    '  $B tab <id>                 — switch to a tab',
+    '  $B newtab [url]             — open a new tab',
+    '  $B closetab [id]            — close a tab (current if no id)',
+    '  $B tab-each <command>       — fan out a command across every tab; returns JSON results',
+    '',
+    'When the user asks for multi-tab work, prefer $B tab-each. Examples:',
+    '  $B tab-each snapshot -i     — grab a snapshot from every tab',
+    '  $B tab-each text            — pull clean text from every tab',
+    '  $B tab-each title           — list every tab\'s title',
+    '',
+    'You\'re in a real terminal with a real PTY — slash commands, /resume, ANSI colors all work as in a normal claude session.',
+  ].join('\n');
+}
+
 /** Spawn claude in a PTY. Returns null if claude not on PATH. */
 function spawnClaude(cols: number, rows: number, onData: (chunk: Buffer) => void) {
   const claudePath = findClaude();
@@ -120,7 +159,15 @@ function spawnClaude(cols: number, rows: number, onData: (chunk: Buffer) => void
     COLORTERM: 'truecolor',
   };
 
-  const proc = (Bun as any).spawn([claudePath], {
+  // --append-system-prompt is the right injection surface (per `claude --help`):
+  // it gets appended to the model's system prompt, so claude treats this as
+  // contextual guidance, not a user message. Don't use a leading PTY write
+  // for this — that would show up as if the user typed the hint, polluting
+  // the visible transcript.
+  const stateDir = path.dirname(STATE_FILE);
+  const tabHint = buildTabAwarenessHint(stateDir);
+
+  const proc = (Bun as any).spawn([claudePath, '--append-system-prompt', tabHint], {
     terminal: {
       rows,
       cols,
@@ -303,6 +350,10 @@ function buildServer() {
             handleTabSwitch(msg);
             return;
           }
+          if (msg?.type === 'tabState') {
+            handleTabState(msg);
+            return;
+          }
           // Unknown text frame — ignore.
           return;
         }
@@ -359,6 +410,65 @@ function buildServer() {
  * and notify the parent server so its activeTabId stays synced. Skips
  * chrome:// and chrome-extension:// internal pages.
  */
+/**
+ * Live tab snapshot. Writes <stateDir>/tabs.json (full list) and updates
+ * <stateDir>/active-tab.json (current active). claude can read these any
+ * time without invoking $B tabs — saves a round-trip when the model just
+ * needs to check the landscape before deciding what to do.
+ */
+function handleTabState(msg: {
+  active?: { tabId?: number; url?: string; title?: string } | null;
+  tabs?: Array<{ tabId?: number; url?: string; title?: string; active?: boolean; windowId?: number; pinned?: boolean; audible?: boolean }>;
+  reason?: string;
+}): void {
+  const stateDir = path.dirname(STATE_FILE);
+  try { fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 }); } catch {}
+
+  // tabs.json — full list
+  if (Array.isArray(msg.tabs)) {
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      reason: msg.reason || 'unknown',
+      tabs: msg.tabs.map(t => ({
+        tabId: t.tabId ?? null,
+        url: t.url || '',
+        title: t.title || '',
+        active: !!t.active,
+        windowId: t.windowId ?? null,
+        pinned: !!t.pinned,
+        audible: !!t.audible,
+      })),
+    };
+    const target = path.join(stateDir, 'tabs.json');
+    const tmp = path.join(stateDir, `.tmp-tabs-${process.pid}`);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 0o600 });
+      fs.renameSync(tmp, target);
+    } catch {
+      safeUnlink(tmp);
+    }
+  }
+
+  // active-tab.json — single active tab. Skip chrome-internal pages so
+  // claude doesn't see chrome:// or chrome-extension:// URLs as
+  // "current target."
+  const active = msg.active;
+  if (active && active.url && !active.url.startsWith('chrome://') && !active.url.startsWith('chrome-extension://')) {
+    const ctxFile = path.join(stateDir, 'active-tab.json');
+    const tmp = path.join(stateDir, `.tmp-tab-${process.pid}`);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify({
+        tabId: active.tabId ?? null,
+        url: active.url,
+        title: active.title ?? '',
+      }), { mode: 0o600 });
+      fs.renameSync(tmp, ctxFile);
+    } catch {
+      safeUnlink(tmp);
+    }
+  }
+}
+
 function handleTabSwitch(msg: { tabId?: number; url?: string; title?: string }): void {
   const url = msg.url || '';
   if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;

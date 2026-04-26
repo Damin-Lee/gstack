@@ -240,6 +240,24 @@
       try {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       } catch {}
+      // Push a fresh tab snapshot so claude's tabs.json is populated by
+      // the time the lazy spawn finishes booting. Background.js exposes
+      // the snapshot helper via chrome.runtime; we ask for it here and
+      // forward whatever comes back.
+      try {
+        chrome.runtime.sendMessage({ type: 'getTabState' }, (resp) => {
+          if (resp && ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({
+                type: 'tabState',
+                active: resp.active,
+                tabs: resp.tabs,
+                reason: 'initial',
+              }));
+            } catch {}
+          }
+        });
+      } catch {}
       // Send a single byte to nudge the agent to spawn claude (lazy-spawn trigger).
       try { ws.send(new TextEncoder().encode('\n')); } catch {}
     });
@@ -334,6 +352,22 @@
     els.restart?.addEventListener('click', forceRestart);
     els.restartNow?.addEventListener('click', forceRestart);
 
+
+    // Live browser-tab state. background.js → sidepanel.js → us. We
+    // forward over the live PTY WebSocket; terminal-agent.ts writes
+    // <stateDir>/active-tab.json + <stateDir>/tabs.json so claude can
+    // always read the current tab landscape.
+    document.addEventListener('gstack:tab-state', (ev) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify({
+          type: 'tabState',
+          active: ev.detail?.active,
+          tabs: ev.detail?.tabs,
+          reason: ev.detail?.reason,
+        }));
+      } catch {}
+    });
 
     // Repaint after a debug-tab → primary-pane transition. The debug
     // tabs (Activity / Refs / Inspector) hide the Terminal pane via

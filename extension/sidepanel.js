@@ -1039,4 +1039,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     inspectorPickerActive = false;
     inspectorPickBtn.classList.remove('active');
   }
+  // browserTabState: full snapshot of all open tabs + the active one,
+  // pushed by background.js on chrome.tabs events. We forward it as a
+  // custom event so sidepanel-terminal.js can relay to terminal-agent.ts.
+  // Result: claude's <stateDir>/tabs.json + active-tab.json stay live.
+  if (msg.type === 'browserTabState') {
+    document.dispatchEvent(new CustomEvent('gstack:tab-state', {
+      detail: { active: msg.active, tabs: msg.tabs, reason: msg.reason },
+    }));
+  }
 });

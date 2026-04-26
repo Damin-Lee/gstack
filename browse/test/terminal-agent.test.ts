@@ -169,6 +169,38 @@ describe('Source-level guard: terminal-agent', () => {
     expect(dispose).toContain("'SIGKILL'");
     expect(dispose).toContain('3000');
   });
+
+  test('tabState frames write tabs.json + active-tab.json', () => {
+    expect(AGENT_SRC).toContain("msg?.type === 'tabState'");
+    expect(AGENT_SRC).toContain('function handleTabState');
+    const fn = AGENT_SRC.slice(AGENT_SRC.indexOf('function handleTabState'));
+    // Atomic write via tmp + rename for both files (so claude never reads
+    // a half-written JSON document).
+    expect(fn).toContain("'tabs.json'");
+    expect(fn).toContain("'active-tab.json'");
+    expect(fn).toContain('renameSync');
+    // Skip chrome:// and chrome-extension:// pages — they're not useful
+    // targets for browse commands.
+    expect(fn).toContain("startsWith('chrome://')");
+    expect(fn).toContain("startsWith('chrome-extension://')");
+  });
+
+  test('claude is spawned with --append-system-prompt tab-awareness hint', () => {
+    expect(AGENT_SRC).toContain('function buildTabAwarenessHint');
+    const hint = AGENT_SRC.slice(AGENT_SRC.indexOf('function buildTabAwarenessHint'));
+    // The hint must mention the live state files and the fanout command —
+    // those are the two affordances that distinguish a gstack-PTY claude
+    // from a plain `claude` session.
+    expect(hint).toContain('tabs.json');
+    expect(hint).toContain('active-tab.json');
+    expect(hint).toContain('tab-each');
+    // And it must be passed via --append-system-prompt at spawn time
+    // (NOT written into the PTY as user input — that would pollute the
+    // visible transcript).
+    const spawn = AGENT_SRC.slice(AGENT_SRC.indexOf('function spawnClaude'));
+    expect(spawn).toContain("'--append-system-prompt'");
+    expect(spawn).toContain('tabHint');
+  });
 });
 
 describe('Source-level guard: server.ts /pty-session route', () => {
