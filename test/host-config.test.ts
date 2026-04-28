@@ -18,7 +18,6 @@ import {
   codex,
   factory,
   kiro,
-  opencode,
   slate,
   cursor,
   openclaw,
@@ -30,8 +29,8 @@ const ROOT = path.resolve(import.meta.dir, '..');
 // ─── hosts/index.ts ─────────────────────────────────────────
 
 describe('hosts/index.ts', () => {
-  test('ALL_HOST_CONFIGS has 10 hosts', () => {
-    expect(ALL_HOST_CONFIGS.length).toBe(10);
+  test('ALL_HOST_CONFIGS has 9 hosts', () => {
+    expect(ALL_HOST_CONFIGS.length).toBe(9);
   });
 
   test('ALL_HOST_NAMES matches config names', () => {
@@ -49,7 +48,6 @@ describe('hosts/index.ts', () => {
     expect(codex.name).toBe('codex');
     expect(factory.name).toBe('factory');
     expect(kiro.name).toBe('kiro');
-    expect(opencode.name).toBe('opencode');
     expect(slate.name).toBe('slate');
     expect(cursor.name).toBe('cursor');
     expect(openclaw.name).toBe('openclaw');
@@ -202,7 +200,7 @@ describe('validateHostConfig', () => {
 
   test('shell injection attempt in cliCommand is caught', () => {
     const c = makeValid();
-    c.cliCommand = 'opencode;rm -rf /';
+    c.cliCommand = 'slate;rm -rf /';
     expect(validateHostConfig(c).some(e => e.includes('cliCommand'))).toBe(true);
   });
 });
@@ -354,20 +352,6 @@ describe('host-config-export.ts CLI', () => {
     expect(lines).toContain('review/checklist.md');
   });
 
-  test('opencode symlinks returns nested runtime assets', () => {
-    const { stdout, exitCode } = run('symlinks', 'opencode');
-    expect(exitCode).toBe(0);
-    const lines = stdout.split('\n');
-    expect(lines).toContain('bin');
-    expect(lines).toContain('browse/dist');
-    expect(lines).toContain('browse/bin');
-    expect(lines).toContain('review/design-checklist.md');
-    expect(lines).toContain('review/greptile-triage.md');
-    expect(lines).toContain('review/specialists');
-    expect(lines).toContain('qa/templates');
-    expect(lines).toContain('qa/references');
-    expect(lines).toContain('plan-devex-review/dx-hall-of-fame.md');
-  });
 
   test('symlinks with missing host exits 1', () => {
     const { exitCode } = run('symlinks');

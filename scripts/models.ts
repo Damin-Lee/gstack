@@ -6,7 +6,7 @@
  * generation time), but the model axis is independent of the host axis.
  *
  * IMPORTANT: host ≠ model. Claude Code can run any Claude model (Opus, Sonnet,
- * Haiku, future). Codex CLI runs GPT/o-series models. Cursor and OpenCode can
+ * Haiku, future). Codex CLI runs GPT/o-series models. Cursor and Slate can
  * front multiple providers. We do NOT auto-detect the model from the host —
  * users pass --model explicitly. Default is 'claude'.
  */

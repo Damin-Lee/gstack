@@ -2243,16 +2243,16 @@ describe('setup script validation', () => {
     expect(fnBody).toContain('rm -f "$target"');
   });
 
-  test('setup supports --host auto|claude|codex|kiro|opencode', () => {
+  test('setup supports --host auto|claude|codex|kiro|factory', () => {
     expect(setupContent).toContain('--host');
-    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|auto');
+    expect(setupContent).toContain('claude|codex|kiro|factory|auto');
   });
 
-  test('auto mode detects claude, codex, kiro, and opencode binaries', () => {
+  test('auto mode detects claude, codex, kiro, and factory binaries', () => {
     expect(setupContent).toContain('command -v claude');
     expect(setupContent).toContain('command -v codex');
     expect(setupContent).toContain('command -v kiro-cli');
-    expect(setupContent).toContain('command -v opencode');
+    expect(setupContent).toContain('command -v droid');
   });
 
   // T1: Sidecar skip guard — prevents .agents/skills/gstack from being linked as a skill
@@ -2279,20 +2279,6 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('~/.kiro/skills/gstack');
   });
 
-  test('setup supports --host opencode with install section and OpenCode skill path vars', () => {
-    expect(setupContent).toContain('INSTALL_OPENCODE=');
-    expect(setupContent).toContain('OPENCODE_SKILLS="$HOME/.config/opencode/skills"');
-    expect(setupContent).toContain('OPENCODE_GSTACK="$OPENCODE_SKILLS/gstack"');
-  });
-
-  test('setup installs OpenCode skills into a nested gstack runtime root', () => {
-    expect(setupContent).toContain('create_opencode_runtime_root');
-    expect(setupContent).toContain('.opencode/skills');
-    expect(setupContent).toContain('review/specialists');
-    expect(setupContent).toContain('qa/templates');
-    expect(setupContent).toContain('qa/references');
-    expect(setupContent).toContain('dx-hall-of-fame.md');
-  });
 
   test('create_agents_sidecar links runtime assets', () => {
     // Sidecar must link bin, browse, review, qa
@@ -2916,7 +2902,7 @@ describe('plan-mode-info resolver (handshake-replacement)', () => {
     // Non-Claude hosts render to hostSubdirs (.agents/, .openclaw/, etc). The
     // plan-mode-info resolver has no host-scoping — all hosts get the new
     // section, none get the old handshake. Scan all candidate host dirs.
-    const hostDirs = ['.agents', '.openclaw', '.opencode', '.factory', '.hermes', '.kiro', '.cursor', '.slate'];
+    const hostDirs = ['.agents', '.openclaw', '.factory', '.hermes', '.kiro', '.cursor', '.slate'];
     let checked = 0;
     for (const host of hostDirs) {
       const skillsRoot = path.join(ROOT, host, 'skills');

@@ -12,7 +12,6 @@ bin/gstack-global-discover
 .agents/
 .factory/
 .kiro/
-.opencode/
 .slate/
 .cursor/
 .openclaw/

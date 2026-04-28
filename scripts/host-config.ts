@@ -1,7 +1,7 @@
 /**
  * Declarative host config system.
  *
- * Each supported host (Claude, Codex, Factory, OpenCode, OpenClaw, etc.) is
+ * Each supported host (Claude, Codex, Factory, Slate, OpenClaw, etc.) is
  * defined as a typed HostConfig object in hosts/*.ts. This module provides
  * the interface, loader, and validator.
  *
@@ -15,21 +15,21 @@
  */
 
 export interface HostConfig {
-  /** Unique host identifier (e.g., 'opencode'). Must match filename in hosts/. */
+  /** Unique host identifier (e.g., 'slate'). Must match filename in hosts/. */
   name: string;
-  /** Human-readable name for UI/logs (e.g., 'OpenCode'). */
+  /** Human-readable name for UI/logs (e.g., 'Slate'). */
   displayName: string;
-  /** Binary name for `command -v` detection (e.g., 'opencode'). */
+  /** Binary name for `command -v` detection (e.g., 'slate'). */
   cliCommand: string;
   /** Alternative binary names (e.g., ['droid'] for factory). */
   cliAliases?: string[];
 
   // --- Path Configuration ---
-  /** Global install path relative to $HOME (e.g., '.config/opencode/skills/gstack'). */
+  /** Global install path relative to $HOME (e.g., '.slate/skills/gstack'). */
   globalRoot: string;
-  /** Project-local skill path relative to repo root (e.g., '.opencode/skills/gstack'). */
+  /** Project-local skill path relative to repo root (e.g., '.slate/skills/gstack'). */
   localSkillRoot: string;
-  /** Gitignored directory under repo root for generated docs (e.g., '.opencode'). */
+  /** Gitignored directory under repo root for generated docs (e.g., '.slate'). */
   hostSubdir: string;
   /** Whether preamble generates $GSTACK_ROOT env vars (true for non-Claude hosts). */
   usesEnvVars: boolean;

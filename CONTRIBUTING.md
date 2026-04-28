@@ -253,11 +253,11 @@ worth the review overhead.
 
 ## Multi-host development
 
-gstack generates SKILL.md files for 8 hosts from one set of `.tmpl` templates.
+gstack generates SKILL.md files for 9 hosts from one set of `.tmpl` templates.
 Each host is a typed config in `hosts/*.ts`. The generator reads these configs
 to produce host-appropriate output (different frontmatter, paths, tool names).
 
-**Supported hosts:** Claude (primary), Codex, Factory, Kiro, OpenCode, Slate, Cursor, OpenClaw.
+**Supported hosts:** Claude (primary), Codex, Factory, Kiro, Slate, Cursor, OpenClaw, Hermes, GBrain.
 
 ### Generating for all hosts
 
@@ -265,8 +265,8 @@ to produce host-appropriate output (different frontmatter, paths, tool names).
 # Generate for a specific host
 bun run gen:skill-docs                    # Claude (default)
 bun run gen:skill-docs --host codex       # Codex
-bun run gen:skill-docs --host opencode    # OpenCode
-bun run gen:skill-docs --host all         # All 8 hosts
+bun run gen:skill-docs --host slate       # Slate
+bun run gen:skill-docs --host all         # All 9 hosts
 
 # Or use build, which does all hosts + compiles binaries
 bun run build
@@ -304,7 +304,7 @@ bun run skill:check
 
 See [docs/ADDING_A_HOST.md](docs/ADDING_A_HOST.md) for the full guide. Short version:
 
-1. Create `hosts/myhost.ts` (copy from `hosts/opencode.ts`)
+1. Create `hosts/myhost.ts` (copy from `hosts/slate.ts`)
 2. Add to `hosts/index.ts`
 3. Add `.myhost/` to `.gitignore`
 4. Run `bun run gen:skill-docs --host myhost`

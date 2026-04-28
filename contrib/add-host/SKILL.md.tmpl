@@ -27,16 +27,16 @@ A single TypeScript file in `hosts/<name>.ts` that defines:
 ### 1. Gather host info
 
 Ask the contributor:
-- What's the agent's name? (e.g., "OpenCode")
-- What's the CLI binary? (e.g., "opencode")
-- Where does it store skills globally? (e.g., "~/.config/opencode/skills/")
-- Where does it store skills locally in a project? (e.g., ".opencode/skills/")
+- What's the agent's name? (e.g., "Slate")
+- What's the CLI binary? (e.g., "slate")
+- Where does it store skills globally? (e.g., "~/.slate/skills/")
+- Where does it store skills locally in a project? (e.g., ".slate/skills/")
 - What frontmatter fields does it support? (name + description is the minimum)
 - Does it have its own tool names? (e.g., "exec" instead of "Bash")
 
 ### 2. Create the config file
 
-Use `hosts/opencode.ts` as a reference. Create `hosts/<name>.ts` with the
+Use `hosts/slate.ts` as a reference. Create `hosts/<name>.ts` with the
 gathered info. Follow the HostConfig interface in `scripts/host-config.ts`.
 
 ### 3. Register in index
